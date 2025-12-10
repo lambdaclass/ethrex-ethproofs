@@ -98,21 +98,23 @@ pub struct CloudInstance {
     pub cpu_effective_cores: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cpu_name: Option<String>,
-    pub memory: u64,
+    pub memory: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gpu_count: Option<u64>,
     #[serde(default, rename = "gpu_arch")]
     pub gpu_architecture: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gpu_name: Option<String>,
+    // Note: gpu_memory field is specified to be an f64 in the API docs but appears to be a String in practice
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gpu_memory: Option<u64>,
+    pub gpu_memory: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mobo_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_name: Option<String>,
+    // Note: disk_space field is specified to be an f64 in the API docs but appears to be a String in practice
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub disk_space: Option<u64>,
+    pub disk_space: Option<String>,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot_date: Option<String>,

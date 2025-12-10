@@ -1,0 +1,150 @@
+use std::fmt::Display;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct MachineConfiguration {
+    /// CPU model name
+    ///
+    /// * Required
+    /// * Max length: 200 characters
+    pub cpu_model: String,
+    /// Number of CPU cores
+    ///
+    /// * Required
+    /// * Must be greater than 0
+    pub cpu_cores: u64,
+    /// List of GPU models
+    ///
+    /// * Optional
+    /// * Each model max length: 200 characters
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_models: Option<Vec<String>>,
+    /// Number of each GPU model
+    ///
+    /// * Optional
+    /// * Each count must be greater than 0
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_count: Option<Vec<u64>>,
+    /// Memory per GPU in GB
+    ///
+    /// * Optional
+    /// * Each size must be greater than 0
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_memory_gb: Option<Vec<u64>>,
+    /// Memory size per module in GB
+    ///
+    /// * Required
+    /// * Each size must be greater than 0
+    pub memory_size_gb: Vec<u64>,
+    /// Number of memory modules
+    ///
+    /// * Required
+    /// * Each count must be greater than 0
+    pub memory_count: Vec<u64>,
+    /// Type of memory modules
+    ///
+    /// * Required
+    /// * Each type max length: 200 characters
+    pub memory_type: Vec<String>,
+    /// Total storage size in GB
+    ///
+    /// * Must be greater than 0
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_size_gb: Option<u64>,
+    /// Total compute power in teraflops
+    ///
+    /// * Optional
+    /// * Must be greater than 0
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_tera_flops: Option<u64>,
+    /// Network configuration between machines
+    ///
+    /// * Optional
+    /// * Max length: 500 characters
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_between_machines: Option<String>,
+    // The following fields are retrieved in practice but not specified in the API docs
+    pub id: u64,
+    pub created_at: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum NumberOrString {
+    Int(u64),
+    String(String),
+}
+
+impl Display for NumberOrString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NumberOrString::Int(num) => write!(f, "{num}"),
+            NumberOrString::String(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct CloudInstance {
+    pub id: u64,
+    // Note: provider field is specified to be required in the API docs but appears to be optional in practice
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<Provider>,
+    pub provider_id: u64,
+    pub instance_name: String,
+    pub region: String,
+    pub hourly_price: f64,
+    #[serde(default, rename = "cpu_arch")]
+    pub cpu_architecture: Option<String>,
+    pub cpu_cores: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_effective_cores: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_name: Option<String>,
+    pub memory: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_count: Option<u64>,
+    #[serde(default, rename = "gpu_arch")]
+    pub gpu_architecture: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_name: Option<String>,
+    // Note: gpu_memory field is specified to be an f64 in the API docs but appears to be a String in practice
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_memory: Option<NumberOrString>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mobo_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_name: Option<String>,
+    // Note: disk_space field is specified to be an f64 in the API docs but appears to be a String in practice
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_space: Option<String>,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_date: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Provider {
+    pub id: u64,
+    pub name: String,
+    pub created_at: String,
+    pub display_name: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct ClusterMachine {
+    pub id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cluster_version_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_instance_id: Option<u64>,
+    // Note: created_at field is specified in the API docs but appears to be missing in practice
+    // pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_instance: Option<CloudInstance>,
+    pub machine: MachineConfiguration,
+    // The following fields are retrieved in practice but not specified in the API docs
+    pub cloud_instance_count: u64,
+    pub machine_count: u64,
+}

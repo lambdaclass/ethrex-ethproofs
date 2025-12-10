@@ -1,0 +1,273 @@
+use crate::rpc::common::BlockNumber;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct DownloadProofRequest {
+    /// The unique proof ID (UUID)
+    ///
+    /// * Required
+    /// * Example: `550e8400-e29b-41d4-a716-446655440000`
+    #[serde(rename = "id")]
+    pub proof_id: String,
+}
+
+/// Download a single proved proof by its proof ID.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct DownloadProofResponse {
+    /// Proof binary file
+    pub proof_binary_file: String,
+}
+
+/// Download all proved proofs for a specific block as a ZIP file.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct DownloadProofsRequest {
+    /// The block hash (0x-prefixed 64 hex characters)
+    ///
+    /// * Required
+    /// * String matching pattern `^0x[a-fA-F0-9]{64}$`
+    /// * Example: `0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef`
+    #[serde(rename = "block")]
+    pub block_hash: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct DownloadProofsResponse {
+    /// ZIP file containing all proofs for the block
+    pub proofs_zip_file: String,
+}
+
+/// Retrieve a filtered and paginated list of proofs
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ListProofsRequest {
+    /// Filter by block number or block hash (0x-prefixed 64 hex characters)
+    ///
+    /// * Optional
+    /// * Example: `block=123456`
+    #[serde(default)]
+    pub block: Option<BlockNumber>,
+    /// Filter by comma-separated cluster UUIDs (e.g., `uuid1,uuid2,uuid3`)
+    ///
+    /// * Optional
+    /// * Example: `clusters=550e8400-e29b-41d4-a716-446655440000,660e8400-e29b-41d4-a716-446655440001`
+    #[serde(default)]
+    pub clusters: Option<String>,
+    /// Number of proofs to return (default: `100`, max: `1000`)
+    ///
+    /// * Optional
+    /// * Integer in range `1..=1000`
+    /// * Default: `100`
+    #[serde(default = "default_limit")]
+    pub limit: u64,
+    /// Number of proofs to skip for pagination (default: `0`)
+    ///
+    /// * Optional
+    /// * Integer greater than or equal to `0`
+    /// * Default: `0`
+    #[serde(default = "default_offset")]
+    pub offset: u64,
+}
+
+fn default_limit() -> u64 {
+    100
+}
+
+fn default_offset() -> u64 {
+    0
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ListProofsResponse {
+    pub proofs: Vec<ProofRecord>,
+    pub total_count: u64,
+    pub limit: u64,
+    pub offset: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ProofRecord {
+    pub block_number: u64,
+    pub cluster_id: u64,
+    pub proof_id: i64,
+    pub proof_status: ProofStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proving_cycles: Option<i64>,
+    pub team_id: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proved_timestamp: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proving_timestamp: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued_timestamp: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proving_time: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<Team>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block: Option<Block>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cluster_version: Option<ClusterVersion>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum ProofStatus {
+    Queued,
+    Proving,
+    Proved,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Team {
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Block {
+    #[serde(rename = "block_number")]
+    pub number: u64,
+    pub hash: String,
+    pub timestamp: String,
+    pub gas_used: u64,
+    pub transaction_count: u64,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ClusterVersion {
+    pub id: u64,
+    pub cluster_id: String,
+    pub version: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    pub cluster: ClusterRecord,
+    pub zkvm_version: ZkvmVersion,
+    pub cluster_machines: Vec<ClusterMachine>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ClusterRecord {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ZkvmVersion {
+    pub id: u64,
+    pub version: String,
+    pub zkvm_id: u64,
+    pub release_date: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ZkvmRecord {
+    pub id: u64,
+    pub name: String,
+    pub slug: String,
+    pub isa: String,
+    pub team_id: String,
+    pub created_at: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ClusterMachine {
+    pub id: u64,
+    pub cluster_version_id: u64,
+    pub machine_id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_instance_id: Option<u64>,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_instance: Option<CloudInstance>,
+    pub machine: Machine,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct CloudInstance {
+    pub id: u64,
+    pub instance_id: String,
+    pub provider_id: u64,
+    pub region: String,
+    pub instance_type: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<Provider>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Provider {
+    pub id: u64,
+    pub name: String,
+    pub created_at: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Machine {
+    pub id: u64,
+    pub name: String,
+    pub cpu_count: u64,
+    pub memory_gb: u64,
+    pub created_at: String,
+}
+
+/// The prover indicates they'll prove a block, but they haven't started proving yet.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct QueuedProofRequest {
+    pub block_number: u64,
+    pub cluster_id: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct QueuedProofResponse {
+    pub proof_id: u64,
+}
+
+/// The prover indicates they've started proving a block.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ProvingProofRequest {
+    pub block_number: u64,
+    pub cluster_id: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ProvingProofResponse {
+    pub proof_id: u64,
+}
+
+/// The prover indicates they've started proving a block.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ProvedProofRequest {
+    pub block_number: u64,
+    pub cluster_id: u64,
+    /// Time in milliseconds taken to generate the proof including witness generation. It excludes time taken for data fetching and any latency to submit the proof.
+    pub proving_time: u64,
+    /// Number of cycles taken to generate the proof.
+    pub proving_cycles: Option<u64>,
+    /// Proof in base64 format.
+    pub proof: String,
+    /// vkey/image-id.
+    pub verifier_id: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ProvedProofResponse {
+    pub proof_id: u64,
+}

@@ -12,5 +12,5 @@ pub enum EthProofsError {
     ApiError { status: u16, message: String },
     /// Failed to parse response
     #[error("Failed to parse response: {0}")]
-    ParseError(String),
+    ParseError(#[from] serde_json::Error),
 }

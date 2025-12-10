@@ -73,7 +73,9 @@ impl EthProofsClient {
             });
         }
 
-        let eth_proofs_response = response.json::<R>().await?;
+        let res = response.json::<serde_json::Value>().await?;
+
+        let eth_proofs_response = serde_json::from_value::<R>(res)?;
 
         Ok(eth_proofs_response)
     }

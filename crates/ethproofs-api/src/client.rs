@@ -103,7 +103,7 @@ impl EthProofsClient {
 
     pub async fn get_block_details(
         &self,
-        block_number: rpc::common::BlockNumber,
+        block_number: rpc::common::NumberOrString,
     ) -> Result<rpc::blocks::GetBlockDetailsResponse, EthProofsError> {
         self.call(rpc::blocks::GetBlockDetailsRequest { block_number })
             .await

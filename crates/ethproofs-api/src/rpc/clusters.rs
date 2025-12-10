@@ -76,40 +76,6 @@ pub struct ClusterConfiguration {
 /// This builder provides a fluent API for creating `CreateClusterRequest` instances,
 /// ensuring that all required fields are set and validating constraints such as
 /// maximum lengths and value ranges.
-///
-/// # Example
-///
-/// ```rust
-/// use ethproofs_api::clusters::{CreateClusterRequestBuilder, ClusterConfiguration, MachineConfiguration};
-///
-/// let request = CreateClusterRequestBuilder::new()
-///     .nickname("My Cluster")
-///     .description("A test cluster")
-///     .zkvm_version_id(1)
-///     .hardware("deprecated")
-///     .cycle_type("SP1")
-///     .proof_type("Groth16")
-///     .configuration(vec![ClusterConfiguration {
-///         machine: MachineConfiguration {
-///             cpu_model: "Intel Xeon".to_string(),
-///             cpu_cores: 4,
-///             gpu_models: vec!["RTX 4090".to_string()],
-///             gpu_count: vec![1],
-///             gpu_memory_gb: vec![24],
-///             memory_size_gb: vec![32],
-///             memory_count: vec![8],
-///             memory_type: vec!["DDR5".to_string()],
-///             storage_size_gb: Some(1000),
-///             total_tera_flops: Some(1000),
-///             network_between_machines: Some("100GbE".to_string()),
-///         },
-///         machine_count: 2,
-///         cloud_instance_name: "c5.xlarge".to_string(),
-///         cloud_instance_count: 1,
-///     }])
-///     .build()
-///     .expect("Failed to build request");
-/// ```
 #[derive(Debug, Default)]
 pub struct CreateClusterRequestBuilder {
     nickname: Option<String>,

@@ -1,4 +1,4 @@
-use crate::rpc::common::BlockNumber;
+use crate::rpc::common::{BlockNumber, CloudInstance, MachineConfiguration};
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct DownloadProofRequest {
@@ -74,7 +74,7 @@ fn default_offset() -> u64 {
     0
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct ListProofsResponse {
     pub proofs: Vec<ProofRecord>,
     pub total_count: u64,
@@ -82,14 +82,15 @@ pub struct ListProofsResponse {
     pub offset: u64,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct ProofRecord {
     pub block_number: u64,
-    pub cluster_id: u64,
-    pub proof_id: i64,
+    // Note: cluster_id should be a number, but in practice it's a string UUID
+    pub cluster_id: String,
+    pub proof_id: u64,
     pub proof_status: ProofStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proving_cycles: Option<i64>,
+    pub proving_cycles: Option<u64>,
     pub team_id: String,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -99,23 +100,30 @@ pub struct ProofRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queued_timestamp: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proving_time: Option<i64>,
+    pub proving_time: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size_bytes: Option<i64>,
+    pub size_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub team: Option<Team>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block: Option<Block>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cluster_version: Option<ClusterVersion>,
+    // The following fields are retrieved in practice but not specified in the API docs
+    pub cluster_version_id: u64,
+    // The following fields are retrieved in practice but not specified in the API docs
+    pub updated_at: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum ProofStatus {
+    #[serde(rename = "queued")]
     Queued,
+    #[serde(rename = "proving")]
     Proving,
+    #[serde(rename = "proved")]
     Proved,
 }
 
@@ -127,6 +135,12 @@ pub struct Team {
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    // The following fields are retrieved in practice but not specified in the API docs
+    pub github_org: String,
+    pub logo_url: Option<String>,
+    pub storage_quota_bytes: Option<u64>,
+    pub twitter_handle: Option<String>,
+    pub website_url: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -142,28 +156,45 @@ pub struct Block {
     pub updated_at: Option<String>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct ClusterVersion {
     pub id: u64,
     pub cluster_id: String,
-    pub version: String,
+    // Note: version field is specified in the API docs but appears to be missing in practice
+    // pub version: String,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
     pub cluster: ClusterRecord,
     pub zkvm_version: ZkvmVersion,
     pub cluster_machines: Vec<ClusterMachine>,
+    // The following fields are retrieved in practice but not specified in the API docs
+    pub is_active: bool,
+    pub vk_path: Option<String>,
+    pub index: u64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ClusterRecord {
     pub id: String,
-    pub name: String,
+    // Note: name field is specified in the API docs but appears to be missing in practice
+    // pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nickname: Option<String>,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    // The following fields are retrieved in practice but not specified in the API docs
+    pub cycle_type: String,
+    pub description: String,
+    pub hardware: String,
+    pub index: u64,
+    pub is_active: bool,
+    pub is_multi_machine: bool,
+    pub is_open_source: bool,
+    pub proof_type: String,
+    pub software_link: Option<String>,
+    pub team_id: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -171,10 +202,12 @@ pub struct ZkvmVersion {
     pub id: u64,
     pub version: String,
     pub zkvm_id: u64,
-    pub release_date: String,
+    // Note: release_date field is not specified as optional in the API docs but appears to be optional in practice
+    pub release_date: Option<String>,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    pub zkvm: ZkvmRecord,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -185,47 +218,32 @@ pub struct ZkvmRecord {
     pub isa: String,
     pub team_id: String,
     pub created_at: String,
+    // The following fields are retrieved in practice but not specified in the API docs
+    pub continuations: bool,
+    pub dual_licenses: bool,
+    pub frontend: String,
+    pub is_open_source: bool,
+    pub is_proving_mainnet: bool,
+    pub parallelizable_proving: bool,
+    pub precompiles: bool,
+    pub repo_url: String,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct ClusterMachine {
     pub id: u64,
     pub cluster_version_id: u64,
     pub machine_id: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cloud_instance_id: Option<u64>,
-    pub created_at: String,
+    // Note: created_at field is specified in the API docs but appears to be missing in practice
+    // pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cloud_instance: Option<CloudInstance>,
-    pub machine: Machine,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct CloudInstance {
-    pub id: u64,
-    pub instance_id: String,
-    pub provider_id: u64,
-    pub region: String,
-    pub instance_type: String,
-    pub created_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<Provider>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct Provider {
-    pub id: u64,
-    pub name: String,
-    pub created_at: String,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct Machine {
-    pub id: u64,
-    pub name: String,
-    pub cpu_count: u64,
-    pub memory_gb: u64,
-    pub created_at: String,
+    pub machine: MachineConfiguration,
+    // The following fields are retrieved in practice but not specified in the API docs
+    pub cloud_instance_count: u64,
+    pub machine_count: u64,
 }
 
 /// The prover indicates they'll prove a block, but they haven't started proving yet.

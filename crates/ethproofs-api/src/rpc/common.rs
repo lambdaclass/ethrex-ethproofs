@@ -62,6 +62,9 @@ pub struct MachineConfiguration {
     /// * Max length: 500 characters
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network_between_machines: Option<String>,
+    // The following fields are retrieved in practice but not specified in the API docs
+    pub id: u64,
+    pub created_at: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -83,7 +86,8 @@ impl Display for BlockNumber {
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 pub struct CloudInstance {
     pub id: u64,
-    pub provider: String,
+    pub provider: Provider,
+    pub provider_id: u64,
     pub instance_name: String,
     pub region: String,
     pub hourly_price: f64,
@@ -112,4 +116,12 @@ pub struct CloudInstance {
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot_date: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Provider {
+    pub id: u64,
+    pub name: String,
+    pub created_at: String,
+    pub display_name: String,
 }

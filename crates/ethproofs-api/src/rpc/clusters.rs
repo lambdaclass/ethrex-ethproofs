@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::rpc::common::{CloudInstance, MachineConfiguration};
+use crate::rpc::common::{ClusterMachine, MachineConfiguration};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CreateClusterRequestError {
@@ -411,6 +411,7 @@ pub struct CreateClusterResponse {
 pub struct ListClustersRequest;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(transparent)]
 pub struct ListClustersResponse {
     pub clusters: Vec<ClusterData>,
 }
@@ -431,15 +432,13 @@ pub struct ClusterData {
     // Serialization not skipped when None to match API response structure (string or null)
     #[serde(default)]
     pub proof_type: Option<String>,
-    pub machines: Vec<MachineData>,
+    // Note: versions field is named machines in the API docs but appears as versions in practice
+    pub versions: Vec<Versions>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct MachineData {
-    pub machine: MachineConfiguration,
-    pub machine_count: u64,
-    pub cloud_instance: CloudInstance,
-    pub cloud_instance_count: u64,
+pub struct Versions {
+    pub cluster_machines: Vec<ClusterMachine>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

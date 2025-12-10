@@ -1,4 +1,4 @@
-use crate::rpc::common::{BlockNumber, CloudInstance, MachineConfiguration};
+use crate::rpc::common::{ClusterMachine, NumberOrString};
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct DownloadProofRequest {
@@ -43,7 +43,7 @@ pub struct ListProofsRequest {
     /// * Optional
     /// * Example: `block=123456`
     #[serde(default)]
-    pub block: Option<BlockNumber>,
+    pub block: Option<NumberOrString>,
     /// Filter by comma-separated cluster UUIDs (e.g., `uuid1,uuid2,uuid3`)
     ///
     /// * Optional
@@ -227,23 +227,6 @@ pub struct ZkvmRecord {
     pub parallelizable_proving: bool,
     pub precompiles: bool,
     pub repo_url: String,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
-pub struct ClusterMachine {
-    pub id: u64,
-    pub cluster_version_id: u64,
-    pub machine_id: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cloud_instance_id: Option<u64>,
-    // Note: created_at field is specified in the API docs but appears to be missing in practice
-    // pub created_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cloud_instance: Option<CloudInstance>,
-    pub machine: MachineConfiguration,
-    // The following fields are retrieved in practice but not specified in the API docs
-    pub cloud_instance_count: u64,
-    pub machine_count: u64,
 }
 
 /// The prover indicates they'll prove a block, but they haven't started proving yet.

@@ -1,4 +1,4 @@
-use crate::rpc::common::BlockNumber;
+use crate::rpc::common::NumberOrString;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GetBlockDetailsRequestError {
@@ -17,7 +17,7 @@ pub struct GetBlockDetailsRequest {
     /// * Required
     /// * Integer or string
     #[serde(rename = "block")]
-    pub block_number: BlockNumber,
+    pub block_number: NumberOrString,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]

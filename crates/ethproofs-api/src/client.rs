@@ -41,10 +41,10 @@ impl EthProofsClient {
     }
 
     /// Generic method to handle any request implementing the Request trait.
-    pub async fn call(
-        &self,
-        request: impl Into<EthProofsRequest>,
-    ) -> Result<EthProofsResponse, EthProofsError> {
+    pub async fn call<R>(&self, request: impl Into<EthProofsRequest>) -> Result<R, EthProofsError>
+    where
+        R: for<'de> serde::Deserialize<'de>,
+    {
         let request = request.into();
 
         let url = format!("{}{}", self.base_url, request.endpoint());
@@ -73,7 +73,7 @@ impl EthProofsClient {
             });
         }
 
-        let eth_proofs_response = response.json().await?;
+        let eth_proofs_response = response.json::<R>().await?;
 
         Ok(eth_proofs_response)
     }
@@ -105,35 +105,34 @@ impl EthProofsClient {
     ) -> Result<rpc::blocks::GetBlockDetailsResponse, EthProofsError> {
         self.call(rpc::blocks::GetBlockDetailsRequest { block_number })
             .await
-            .map(TryInto::try_into)?
     }
 
     pub async fn create_cluster(
         &self,
         request: rpc::clusters::CreateClusterRequest,
     ) -> Result<rpc::clusters::CreateClusterResponse, EthProofsError> {
-        self.call(request).await.map(TryInto::try_into)?
+        self.call(request).await
     }
 
     pub async fn list_clusters(
         &self,
         request: rpc::clusters::ListClustersRequest,
     ) -> Result<rpc::clusters::ListClustersResponse, EthProofsError> {
-        self.call(request).await.map(TryInto::try_into)?
+        self.call(request).await
     }
 
     pub async fn list_active_clusters_for_team(
         &self,
         request: rpc::clusters::ListActiveClustersForATeamRequest,
     ) -> Result<rpc::clusters::ListActiveClustersForATeamResponse, EthProofsError> {
-        self.call(request).await.map(TryInto::try_into)?
+        self.call(request).await
     }
 
     pub async fn create_single_machine(
         &self,
         request: rpc::single_machine::CreateSingleMachineRequest,
     ) -> Result<rpc::single_machine::CreateSingleMachineResponse, EthProofsError> {
-        self.call(request).await.map(TryInto::try_into)?
+        self.call(request).await
     }
 
     pub async fn download_proof(
@@ -144,27 +143,26 @@ impl EthProofsClient {
             proof_id: proof_id.to_string(),
         })
         .await
-        .map(TryInto::try_into)?
     }
 
     pub async fn list_proofs(
         &self,
         request: rpc::proofs::ListProofsRequest,
     ) -> Result<rpc::proofs::ListProofsResponse, EthProofsError> {
-        self.call(request).await.map(TryInto::try_into)?
+        self.call(request).await
     }
 
     pub async fn queue_proof(
         &self,
         request: rpc::proofs::QueuedProofRequest,
     ) -> Result<rpc::proofs::QueuedProofResponse, EthProofsError> {
-        self.call(request).await.map(TryInto::try_into)?
+        self.call(request).await
     }
 
     pub async fn list_cloud_instances(
         &self,
         request: rpc::cloud_instances::ListCloudInstancesRequest,
     ) -> Result<rpc::cloud_instances::ListCloudInstancesResponse, EthProofsError> {
-        self.call(request).await.map(TryInto::try_into)?
+        self.call(request).await
     }
 }

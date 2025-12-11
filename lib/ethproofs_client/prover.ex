@@ -50,8 +50,17 @@ defmodule EthProofsClient.Prover do
             [
               :binary,
               :exit_status,
-              args: ["execute", "-e", state.elf, "-i", input_path, "-u"]
-              # args: ["prove", "-e", state.elf, "-i", input_path, "-o", @output_dir <> "/" <> Integer.to_string(block_number), "-a", "-u"]
+              args: [
+                "prove",
+                "-e",
+                state.elf,
+                "-i",
+                input_path,
+                "-o",
+                output_dir_path,
+                "-a",
+                "-u"
+              ]
             ]
           )
 

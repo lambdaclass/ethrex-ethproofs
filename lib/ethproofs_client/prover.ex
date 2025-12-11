@@ -117,7 +117,9 @@ defmodule EthProofsClient.Prover do
             send(self(), :prove_next)
 
           {:error, reason} ->
-            Logger.error("Failed to read proof data for block #{state.current_block}: #{reason}")
+            Logger.error(
+              "Failed to read proof data for block #{state.current_block}: #{reason}. Call to EthProofsClient.Rpc.proved_proof skipped."
+            )
 
             # Still trigger next to avoid blocking the queue
             send(self(), :prove_next)

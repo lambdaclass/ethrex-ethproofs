@@ -51,7 +51,7 @@ defmodule EthProofsClient.InputGenerator do
 
             case generate_input(block_json_bytes, witness_json_bytes) do
               {:ok, input_path} ->
-                Prover.prove(input_path)
+                Prover.prove(block_number, input_path)
 
               {:error, reason} ->
                 Logger.error("NIF error: #{reason}")

@@ -1,0 +1,119 @@
+defmodule EthProofsClient.InputGenerator do
+  use Rustler, otp_app: :ethproofs_client, crate: "ethrex_ethproofs_input_generator"
+  use GenServer
+  require Logger
+
+  alias EthProofsClient.Prover
+
+  def start_link(_opts \\ []) do
+    GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
+  end
+
+  def generate(block_number) do
+    GenServer.cast(__MODULE__, {:generate, block_number})
+  end
+
+  @impl true
+  def init(_state) do
+    Process.send_after(self(), :fetch_latest_block_number, 12_000)
+
+    {:ok, %{queue: :queue.new(), generating: false}}
+  end
+
+  @impl true
+  def handle_cast({:generate, block_number}, state) do
+    new_queue = :queue.in(block_number, state.queue)
+
+    if state.generating do
+      Logger.info("Input generation already in progress, enqueued block number #{block_number}")
+
+      {:noreply, %{state | queue: new_queue}}
+    else
+      send(self(), :generate_next)
+
+      {:noreply, %{state | queue: new_queue, generating: true}}
+    end
+  end
+
+  @impl true
+  def handle_info(:generate_next, %{queue: queue} = state) do
+    case :queue.out(queue) do
+      {{:value, block_number}, new_queue} ->
+        Logger.info("Generating input for block number: #{block_number}")
+
+        Task.start(fn ->
+          try do
+            {:ok, block_json_bytes} =
+              EthProofsClient.EthRpc.get_block_by_number(block_number, true, raw: true)
+
+            {:ok, witness_json_bytes} =
+              EthProofsClient.EthRpc.debug_execution_witness(block_number, raw: true)
+
+            case generate_input(block_json_bytes, witness_json_bytes) do
+              {:ok, input_path} ->
+                Prover.prove(input_path)
+
+              {:error, reason} ->
+                Logger.error("NIF error: #{reason}")
+            end
+
+            send(__MODULE__, {:generation_done, block_number})
+          rescue
+            e ->
+              Logger.error("Failed to generate input for block #{block_number}: #{inspect(e)}")
+
+              send(__MODULE__, {:generation_done, block_number})
+          end
+        end)
+
+        {:noreply, %{state | queue: new_queue, generating: true}}
+
+      {:empty, _queue} ->
+        Logger.debug("Input generation queue is empty, stopping generation")
+
+        {:noreply, %{state | generating: false}}
+    end
+  end
+
+  @impl true
+  def handle_info({:generation_done, _block_number}, state) do
+    # Generation completed, check for next item
+    if :queue.is_empty(state.queue) do
+      {:noreply, %{state | generating: false}}
+    else
+      send(self(), :generate_next)
+
+      {:noreply, %{state | generating: true}}
+    end
+  end
+
+  @impl true
+  def handle_info(:fetch_latest_block_number, state) do
+    case EthProofsClient.EthRpc.get_latest_block_number() do
+      {:ok, block_number} ->
+        if rem(block_number, 100) == 0 do
+          Logger.info("Block #{block_number} is a multiple of 100, generating input")
+
+          GenServer.cast(__MODULE__, {:generate, block_number})
+        else
+          next_multiple_of_100 = block_number + (100 - rem(block_number, 100))
+
+          estimated_wait = (next_multiple_of_100 - block_number) * 12
+
+          Logger.debug(
+            "Latest block number: #{block_number}. Next multiple of 100 is #{next_multiple_of_100}, estimated wait time: #{estimated_wait} seconds"
+          )
+        end
+
+      {:error, reason} ->
+        Logger.error("Failed to fetch latest block number: #{reason}")
+    end
+
+    Process.send_after(self(), :fetch_latest_block_number, 12_000)
+
+    {:noreply, state}
+  end
+
+  defp generate_input(_rpc_block_bytes, _rpc_execution_witness_bytes),
+    do: :erlang.nif_error(:nif_not_loaded)
+end

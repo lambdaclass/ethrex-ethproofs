@@ -1,0 +1,4 @@
+[workspace]
+resolver = "2"
+
+members = ["native/ethrex_ethproofs_input_generator"]

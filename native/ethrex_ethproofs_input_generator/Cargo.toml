@@ -1,0 +1,19 @@
+[package]
+name = "ethrex_ethproofs_input_generator"
+version = "0.1.0"
+authors = []
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ethrex-config = { git = "https://github.com/lambdaclass/ethrex", branch = "main", package = "ethrex-config" }
+ethrex-rpc = { git = "https://github.com/lambdaclass/ethrex", branch = "main", package = "ethrex-rpc" }
+ethrex-guest = { git = "https://github.com/lambdaclass/ethrex", branch = "main", package = "guest_program" }
+
+rkyv = { version = "0.8.10", features = ["std", "unaligned"] }
+
+serde_json = "1.0.145"
+
+rustler = "0.37.2"

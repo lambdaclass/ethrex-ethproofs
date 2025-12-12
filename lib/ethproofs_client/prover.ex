@@ -174,7 +174,7 @@ defmodule EthProofsClient.Prover do
        %{
          cycles: cycles,
          time: time,
-         proof: Base.encode64(proof_binary, padding: true) |> String.replace("\n", ""),
+         proof: Base.encode64(proof_binary, padding: false) |> String.replace(~r/\s+/, ""),
          id: id
        }}
     else

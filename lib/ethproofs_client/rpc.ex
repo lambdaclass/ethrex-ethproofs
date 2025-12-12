@@ -64,7 +64,11 @@ defmodule EthProofsClient.Rpc do
       url ->
         url = url <> "/" <> endpoint
 
-        {:ok, rsp} = post(url, Jason.encode!(body))
+        body = Jason.encode!(body)
+
+        Logger.debug("Sending request to #{url} with body: #{body}")
+
+        {:ok, rsp} = post(url, body)
 
         handle_response(rsp)
     end

@@ -56,18 +56,17 @@ defmodule EthProofsClient.Prover do
             [
               :binary,
               :exit_status,
-              args: ["execute", "-e", state.elf, "-i", input_path, "-o", "-u"]
-              # args: [
-              #   "prove",
-              #   "-e",
-              #   state.elf,
-              #   "-i",
-              #   input_path,
-              #   "-o",
-              #   output_dir_path,
-              #   "-a",
-              #   "-u"
-              # ]
+              args: [
+                "prove",
+                "-e",
+                state.elf,
+                "-i",
+                input_path,
+                "-o",
+                output_dir_path,
+                "-a",
+                "-u"
+              ]
             ]
           )
 
@@ -122,7 +121,7 @@ defmodule EthProofsClient.Prover do
                    proving_time,
                    proving_cycles,
                    proof,
-                    verifier_id
+                   verifier_id
                  ) do
               {:ok, _proof_id} ->
                 :ok

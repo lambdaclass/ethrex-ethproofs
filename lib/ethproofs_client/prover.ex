@@ -56,17 +56,18 @@ defmodule EthProofsClient.Prover do
             [
               :binary,
               :exit_status,
-              args: [
-                "prove",
-                "-e",
-                state.elf,
-                "-i",
-                input_path,
-                "-o",
-                output_dir_path,
-                "-a",
-                "-u"
-              ]
+              args: ["execute", "-e", state.elf, "-i", input_path, "-o", "-u"]
+              # args: [
+              #   "prove",
+              #   "-e",
+              #   state.elf,
+              #   "-i",
+              #   input_path,
+              #   "-o",
+              #   output_dir_path,
+              #   "-a",
+              #   "-u"
+              # ]
             ]
           )
 
@@ -111,7 +112,7 @@ defmodule EthProofsClient.Prover do
         Logger.info("cargo-zisk exited with status: #{status}")
 
         case read_proof_data(state.current_block) do
-          {:ok, %{cycles: proving_cycles, time: proving_time, proof: proof}} ->
+          {:ok, %{cycles: proving_cycles, time: proving_time, proof: proof, id: verifier_id}} ->
             Logger.info(
               "Proved block #{state.current_block} in #{proving_time} seconds using #{proving_cycles} cycles"
             )
@@ -120,7 +121,8 @@ defmodule EthProofsClient.Prover do
                    state.current_block,
                    proving_time,
                    proving_cycles,
-                   proof
+                   proof,
+                    verifier_id
                  ) do
               {:ok, _proof_id} ->
                 :ok
@@ -167,9 +169,9 @@ defmodule EthProofsClient.Prover do
     proof_path = Path.join([@output_dir, block_dir, "vadcop_final_proof.compressed.bin"])
 
     with {:ok, result_content} <- File.read(result_path),
-         {:ok, %{"cycles" => cycles, "time" => time, "id" => _id}} <- Jason.decode(result_content),
+         {:ok, %{"cycles" => cycles, "time" => time, "id" => id}} <- Jason.decode(result_content),
          {:ok, proof_binary} <- File.read(proof_path) do
-      {:ok, %{cycles: cycles, time: time, proof: Base.encode64(proof_binary)}}
+      {:ok, %{cycles: cycles, time: time, proof: Base.encode64(proof_binary), id: id}}
     else
       {:error, reason} -> {:error, reason}
     end

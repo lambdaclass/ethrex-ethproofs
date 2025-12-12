@@ -113,7 +113,7 @@ defmodule EthProofsClient.Prover do
         case read_proof_data(state.current_block) do
           {:ok, %{cycles: proving_cycles, time: proving_time, proof: proof, id: verifier_id}} ->
             Logger.info(
-              "Proved block #{state.current_block} in #{proving_time} seconds using #{proving_cycles} cycles"
+              "Proved block #{state.current_block} in #{proving_time / 1000} seconds using #{proving_cycles} cycles"
             )
 
             case EthProofsClient.Rpc.proved_proof(
@@ -173,7 +173,7 @@ defmodule EthProofsClient.Prover do
       {:ok,
        %{
          cycles: cycles,
-         time: time,
+         time: trunc(time * 1000),
          proof: Base.encode64(proof_binary, padding: false) |> String.replace(~r/\s+/, ""),
          id: id
        }}

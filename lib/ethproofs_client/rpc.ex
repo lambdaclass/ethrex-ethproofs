@@ -4,6 +4,8 @@ defmodule EthProofsClient.Rpc do
 
   use Tesla
 
+  @output_dir "output"
+
   plug(Tesla.Middleware.Headers, [
     {"content-type", "application/json"},
     {"authorization", "Bearer " <> ethproofs_api_key()}
@@ -51,10 +53,10 @@ defmodule EthProofsClient.Rpc do
     }
 
     body = if verifier_id, do: Map.put(body, :verifier_id, verifier_id), else: body
-    send_request("proofs/proved", body)
+    send_request("proofs/proved", body, true)
   end
 
-  defp send_request(endpoint, body) do
+  defp send_request(endpoint, body, persist_body \\ false) do
     case ethproofs_rpc_url() do
       nil ->
         Logger.warning("ETHPROOFS_RPC_URL not set, skipping RPC call to #{endpoint}")
@@ -64,11 +66,28 @@ defmodule EthProofsClient.Rpc do
       url ->
         url = url <> "/" <> endpoint
 
-        body = Jason.encode!(body)
+        encoded_body = Jason.encode!(body)
 
-        Logger.debug("Sending request to #{url} with body: #{body}")
+        if persist_body do
+          request_body_path =
+            Path.join([
+              @output_dir,
+              Integer.to_string(body.block_number),
+              Integer.to_string(body.block_number) <>
+                ".json"
+            ])
 
-        {:ok, rsp} = post(url, body)
+          Logger.debug("Persisting request body for block #{body.block_number} to disk")
+
+          File.write!(
+            request_body_path,
+            encoded_body
+          )
+        end
+
+        Logger.debug("Sending request to #{url} with body: #{encoded_body}")
+
+        {:ok, rsp} = post(url, encoded_body)
 
         handle_response(rsp)
     end

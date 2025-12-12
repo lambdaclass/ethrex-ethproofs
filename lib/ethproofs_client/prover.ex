@@ -14,6 +14,13 @@ defmodule EthProofsClient.Prover do
 
   @impl true
   def init(%{elf: elf}) do
+    # By setting Process.flag(:trap_exit, true) in the init function and
+    # linking the port with Process.link(port) after opening it, the
+    # GenServer will now properly handle port exits without crashing. When
+    # cargo-zisk dies due to an OOM (or any other reason), the GenServer
+    # receives an {:EXIT, port, reason} message and continues processing
+    # the queue, preventing the application from terminating.
+    Process.flag(:trap_exit, true)
     {:ok, %{queue: :queue.new(), proving: false, elf: elf, port: nil, current_block: nil}}
   end
 
@@ -69,6 +76,14 @@ defmodule EthProofsClient.Prover do
               ]
             ]
           )
+
+        # By setting Process.flag(:trap_exit, true) in the init function and
+        # linking the port with Process.link(port) after opening it, the
+        # GenServer will now properly handle port exits without crashing. When
+        # cargo-zisk dies due to an OOM (or any other reason), the GenServer
+        # receives an {:EXIT, port, reason} message and continues processing
+        # the queue, preventing the application from terminating.
+        Process.link(port)
 
         case EthProofsClient.Rpc.proving_proof(block_number) do
           {:ok, _proof_id} ->

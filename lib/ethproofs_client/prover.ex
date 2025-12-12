@@ -170,7 +170,13 @@ defmodule EthProofsClient.Prover do
     with {:ok, result_content} <- File.read(result_path),
          {:ok, %{"cycles" => cycles, "time" => time, "id" => id}} <- Jason.decode(result_content),
          {:ok, proof_binary} <- File.read(proof_path) do
-      {:ok, %{cycles: cycles, time: time, proof: Base.encode64(proof_binary), id: id}}
+      {:ok,
+       %{
+         cycles: cycles,
+         time: time,
+         proof: Base.encode64(proof_binary, padding: true) |> String.replace("\n", ""),
+         id: id
+       }}
     else
       {:error, reason} -> {:error, reason}
     end

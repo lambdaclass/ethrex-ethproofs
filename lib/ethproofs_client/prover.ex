@@ -56,18 +56,17 @@ defmodule EthProofsClient.Prover do
             [
               :binary,
               :exit_status,
-              args: ["execute", "-e", state.elf, "-i", input_path, "-o", "-u"]
-              # args: [
-              #   "prove",
-              #   "-e",
-              #   state.elf,
-              #   "-i",
-              #   input_path,
-              #   "-o",
-              #   output_dir_path,
-              #   "-a",
-              #   "-u"
-              # ]
+              args: [
+                "prove",
+                "-e",
+                state.elf,
+                "-i",
+                input_path,
+                "-o",
+                output_dir_path,
+                "-a",
+                "-u"
+              ]
             ]
           )
 
@@ -127,7 +126,9 @@ defmodule EthProofsClient.Prover do
                 :ok
 
               {:error, reason} ->
-                Logger.error("Failed to submit proved proof for block #{state.current_block}: #{reason}")
+                Logger.error(
+                  "Failed to submit proved proof for block #{state.current_block}: #{reason}"
+                )
             end
 
             # Process finished, trigger next item

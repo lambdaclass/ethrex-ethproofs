@@ -43,7 +43,7 @@ defmodule EthProofsClient.Rpc do
         verifier_id \\ nil
       ) do
     body = %{
-      block_number: String.to_integer(block_number),
+      block_number: block_number,
       cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id()),
       proving_time: String.to_integer(proving_time),
       proving_cycles: String.to_integer(proving_cycles),

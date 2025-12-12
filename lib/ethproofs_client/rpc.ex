@@ -71,12 +71,19 @@ defmodule EthProofsClient.Rpc do
   end
 
   defp handle_response(rsp) do
-    case Jason.decode!(rsp.body) do
-      %{"proof_id" => id} ->
-        {:ok, id}
+    if rsp.status == 200 do
+      case Jason.decode(rsp.body) do
+        {:ok, %{"proof_id" => id}} ->
+          {:ok, id}
 
-      %{"error" => error} ->
-        {:error, error}
+        {:ok, %{"error" => error}} ->
+          {:error, error}
+
+        {:error, decode_error} ->
+          {:error, "Invalid JSON response: #{decode_error}"}
+      end
+    else
+      {:error, "HTTP #{rsp.status}: #{rsp.body}"}
     end
   end
 end

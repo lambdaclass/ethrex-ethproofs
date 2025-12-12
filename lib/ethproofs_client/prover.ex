@@ -21,7 +21,13 @@ defmodule EthProofsClient.Prover do
   def handle_cast({:prove, block_number, input_path}, state) do
     new_queue = :queue.in({block_number, input_path}, state.queue)
 
-    {:ok, _proof_id} = EthProofsClient.Rpc.queued_proof(block_number)
+    case EthProofsClient.Rpc.queued_proof(block_number) do
+      {:ok, _proof_id} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Failed to queue proof for block #{block_number}: #{reason}")
+    end
 
     if state.proving do
       Logger.info(
@@ -50,22 +56,28 @@ defmodule EthProofsClient.Prover do
             [
               :binary,
               :exit_status,
-              args: [
-                "prove",
-                "-e",
-                state.elf,
-                "-i",
-                input_path,
-                "-o",
-                output_dir_path,
-                "-a",
-                "-u"
-              ]
+              args: ["execute", "-e", state.elf, "-i", input_path, "-o", "-u"]
+              # args: [
+              #   "prove",
+              #   "-e",
+              #   state.elf,
+              #   "-i",
+              #   input_path,
+              #   "-o",
+              #   output_dir_path,
+              #   "-a",
+              #   "-u"
+              # ]
             ]
           )
 
-        {:ok, _proof_id} =
-          EthProofsClient.Rpc.proving_proof(block_number)
+        case EthProofsClient.Rpc.proving_proof(block_number) do
+          {:ok, _proof_id} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.error("Failed to mark proving for block #{block_number}: #{reason}")
+        end
 
         Logger.info(
           "Started cargo-zisk prover for ELF: #{state.elf}, INPUT: #{input_path}, BLOCK: #{block_number}, PORT: #{inspect(port)}"
@@ -105,13 +117,18 @@ defmodule EthProofsClient.Prover do
               "Proved block #{state.current_block} in #{proving_time} seconds using #{proving_cycles} cycles"
             )
 
-            {:ok, _proof_id} =
-              EthProofsClient.Rpc.proved_proof(
-                state.current_block,
-                proving_time,
-                proving_cycles,
-                proof
-              )
+            case EthProofsClient.Rpc.proved_proof(
+                   state.current_block,
+                   proving_time,
+                   proving_cycles,
+                   proof
+                 ) do
+              {:ok, _proof_id} ->
+                :ok
+
+              {:error, reason} ->
+                Logger.error("Failed to submit proved proof for block #{state.current_block}: #{reason}")
+            end
 
             # Process finished, trigger next item
             send(self(), :prove_next)

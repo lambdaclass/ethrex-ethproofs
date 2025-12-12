@@ -24,14 +24,14 @@ defmodule EthProofsClient.Rpc do
   def queued_proof(block_number) do
     send_request("proofs/queued", %{
       block_number: block_number,
-      cluster_id: EthProofsClient.Rpc.ethproofs_cluster_id()
+      cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id())
     })
   end
 
   def proving_proof(block_number) do
     send_request("proofs/proving", %{
       block_number: block_number,
-      cluster_id: EthProofsClient.Rpc.ethproofs_cluster_id()
+      cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id())
     })
   end
 
@@ -44,7 +44,7 @@ defmodule EthProofsClient.Rpc do
       ) do
     body = %{
       block_number: block_number,
-      cluster_id: EthProofsClient.Rpc.ethproofs_cluster_id(),
+      cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id()),
       proving_time: proving_time,
       proving_cycles: proving_cycles,
       proof: proof

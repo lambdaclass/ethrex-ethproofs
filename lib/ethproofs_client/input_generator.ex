@@ -15,7 +15,6 @@ defmodule EthProofsClient.InputGenerator do
 
   @impl true
   def init(_state) do
-    # 10 seconds instead of 12 to avoid drift with block times
     Process.send_after(self(), :fetch_latest_block_number, 2_000)
 
     {:ok, %{queue: :queue.new(), generating: false}}

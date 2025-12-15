@@ -19,7 +19,7 @@ defmodule EthProofsClient.InputGenerator do
   def init(_state) do
     Process.send_after(self(), :fetch_latest_block_number, @block_fetch_interval)
 
-    {:ok, %{queue: :queue.new(), generating: false, last_proved_block: nil}}
+    {:ok, %{queue: :queue.new(), generating: false}}
   end
 
   @impl true
@@ -111,8 +111,8 @@ defmodule EthProofsClient.InputGenerator do
               "Latest block number: #{block_number}. Estimated wait time until next multiple of 100 (#{next_multiple_of_100}): #{estimated_wait} seconds"
             )
 
-          block_number == state.last_proved_block ->
-            Logger.debug("Block #{block_number} already proved, skipping input generation")
+          File.exists?(Integer.to_string(block_number) <> ".bin") ->
+            Logger.debug("Block #{block_number} already processed, skipping")
 
           true ->
             Logger.info("Block #{block_number} is a multiple of 100, generating input")

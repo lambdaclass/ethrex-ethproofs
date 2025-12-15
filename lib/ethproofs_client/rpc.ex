@@ -72,39 +72,38 @@ defmodule EthProofsClient.Rpc do
         Logger.warning("ETHPROOFS_RPC_URL not set, skipping RPC call to #{endpoint}")
 
         {:ok, :skipped}
-    end
 
-    {:ok, url} = ethproofs_rpc_url()
+      {:ok, url} = ethproofs_rpc_url() ->
+        url = url <> "/" <> endpoint
 
-    url = url <> "/" <> endpoint
+        encoded_body = Jason.encode!(body)
 
-    encoded_body = Jason.encode!(body)
+        if persist_body do
+          request_body_path =
+            Path.join([
+              @output_dir,
+              Integer.to_string(body.block_number),
+              Integer.to_string(body.block_number) <>
+                ".json"
+            ])
 
-    if persist_body do
-      request_body_path =
-        Path.join([
-          @output_dir,
-          Integer.to_string(body.block_number),
-          Integer.to_string(body.block_number) <>
-            ".json"
-        ])
+          Logger.debug("Persisting request body for block #{body.block_number} to disk")
 
-      Logger.debug("Persisting request body for block #{body.block_number} to disk")
+          File.write!(
+            request_body_path,
+            encoded_body
+          )
+        end
 
-      File.write!(
-        request_body_path,
-        encoded_body
-      )
-    end
+        Logger.debug("Sending request to #{url} with body: #{encoded_body}")
 
-    Logger.debug("Sending request to #{url} with body: #{encoded_body}")
+        case post(url, encoded_body) do
+          {:ok, rsp} ->
+            handle_response(rsp)
 
-    case post(url, encoded_body) do
-      {:ok, rsp} ->
-        handle_response(rsp)
-
-      {:error, reason} ->
-        {:error, "HTTP request failed: #{reason}"}
+          {:error, reason} ->
+            {:error, "HTTP request failed: #{reason}"}
+        end
     end
   end
 

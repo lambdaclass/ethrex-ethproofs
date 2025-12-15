@@ -24,7 +24,9 @@ defmodule EthProofsClient.InputGenerator do
 
   @impl true
   def handle_cast({:generate, block_number}, state) do
-    if :queue.is_empty(state.queue) or block_number > :queue.get_r(state.queue) do
+    queue_list = :queue.to_list(state.queue)
+
+    if block_number not in queue_list do
       new_queue = :queue.in(block_number, state.queue)
 
       if state.generating do

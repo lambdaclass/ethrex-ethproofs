@@ -5,6 +5,8 @@ defmodule EthProofsClient.InputGenerator do
 
   alias EthProofsClient.Prover
 
+  @block_fetch_interval 2_000
+
   def start_link(_opts \\ []) do
     GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
   end
@@ -15,7 +17,7 @@ defmodule EthProofsClient.InputGenerator do
 
   @impl true
   def init(_state) do
-    Process.send_after(self(), :fetch_latest_block_number, 2_000)
+    Process.send_after(self(), :fetch_latest_block_number, @block_fetch_interval)
 
     {:ok, %{queue: :queue.new(), generating: false}}
   end
@@ -109,7 +111,7 @@ defmodule EthProofsClient.InputGenerator do
         Logger.error("Failed to fetch latest block number: #{reason}")
     end
 
-    Process.send_after(self(), :fetch_latest_block_number, 12_000)
+    Process.send_after(self(), :fetch_latest_block_number, @block_fetch_interval)
 
     {:noreply, state}
   end

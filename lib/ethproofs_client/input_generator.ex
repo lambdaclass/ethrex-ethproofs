@@ -24,16 +24,22 @@ defmodule EthProofsClient.InputGenerator do
 
   @impl true
   def handle_cast({:generate, block_number}, state) do
-    new_queue = :queue.in(block_number, state.queue)
+    if :queue.is_empty(state.queue) or block_number > :queue.get_r(state.queue) do
+      new_queue = :queue.in(block_number, state.queue)
 
-    if state.generating do
-      Logger.info("Input generation already in progress, enqueued block number #{block_number}")
+      if state.generating do
+        Logger.info("Input generation already in progress, enqueued block number #{block_number}")
 
-      {:noreply, %{state | queue: new_queue}}
+        {:noreply, %{state | queue: new_queue}}
+      else
+        send(self(), :generate_next)
+
+        {:noreply, %{state | queue: new_queue, generating: true}}
+      end
     else
-      send(self(), :generate_next)
+      Logger.info("Block #{block_number} already queued")
 
-      {:noreply, %{state | queue: new_queue, generating: true}}
+      {:noreply, state}
     end
   end
 

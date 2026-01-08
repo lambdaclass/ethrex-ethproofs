@@ -174,15 +174,25 @@ defmodule EthProofsClient.Prover do
               send(self(), :prove_next)
           end
         else
-          if status == 0 do
-            Logger.info(
-              "Executed block #{state.current_block} with cargo-zisk #{zisk_action_label}"
-            )
-          else
-            Logger.error(
-              "Execution failed for block #{state.current_block} with cargo-zisk #{zisk_action_label} (status #{status})"
-            )
-          end
+          execution_result =
+            if status == 0 do
+              Logger.info(
+                "Executed block #{state.current_block} with cargo-zisk #{zisk_action_label}"
+              )
+
+              :ok
+            else
+              Logger.error(
+                "Execution failed for block #{state.current_block} with cargo-zisk #{zisk_action_label} (status #{status})"
+              )
+
+              :error
+            end
+
+          EthProofsClient.Notifications.block_execution_result(
+            state.current_block,
+            execution_result
+          )
 
           send(self(), :prove_next)
         end

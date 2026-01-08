@@ -5,7 +5,7 @@ EthProofs client written in Elixir, powered by ethrex.
 ## 🚀 Getting Started
 
 > [!WARNING]
-> The current version of this project only supports single-GPU ZisK proving using the `cargo-zisk prove` command under-the-hood. Support for distributed proving and server mode will be added in future releases.
+> The current version of this project only supports single-GPU ZisK proving using the `cargo-zisk prove` command under-the-hood. For quick local runs without proof generation, set `ZISK_ACTION=execute`. Support for distributed proving and server mode will be added in future releases.
 
 ### Requirements
 
@@ -111,6 +111,7 @@ ETHPROOFS_RPC_URL=<ETHPROOFS_RPC_URL> \
 ETHPROOFS_CLUSTER_ID=<ETHPROOFS_CLUSTER_ID> \
 ETH_RPC_URL=<ETH_RPC_URL> \
 ELF_PATH=<ELF_PATH> \
+ZISK_ACTION=prove \
 iex -S mix
 ```
 
@@ -122,6 +123,7 @@ iex -S mix
 > - Replace `<RPC_URL>` with your Ethereum Mainnet node HTTP JSON-RPC URL.
 > - Remove the `LOG_LEVEL=debug` part if you don't want debug logs (they're useful and not too verbose though).
 > - Make sure the `ELF_PATH` points to the correct guest program ELF file. You can either generate the ELF file yourself from the [ethrex repository](https://github.com/lambdaclass/ethrex) by running `cargo c -r -p ethrex-prover -F zisk` from the root and getting the file generated in `crates/l2/prover/src/guest_program/src/zisk/target/riscv64ima-zisk-zkvm-elf/release/zkvm-zisk-program`, or download it from the [releases page](https://github.com/lambdaclass/ethrex/releases).
+> - To do a quick non-proving run, set `ZISK_ACTION=execute`. This uses `cargo-zisk execute` under the hood and skips proof reporting.
 
 > [!TIP]
 > If you want to run the EthProofs client without sending requests to the EthProofs API (for testing purposes), you do this by not passing the `ETHPROOFS_` environment variables.

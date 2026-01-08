@@ -3,6 +3,7 @@ defmodule EthProofsClient.Prover do
   require Logger
 
   @output_dir "output"
+  @default_zisk_action "prove"
 
   def start_link(elf_path, _opts \\ []) do
     GenServer.start_link(__MODULE__, %{elf: elf_path}, name: __MODULE__)
@@ -21,19 +22,38 @@ defmodule EthProofsClient.Prover do
     # receives an {:EXIT, port, reason} message and continues processing
     # the queue, preventing the application from terminating.
     Process.flag(:trap_exit, true)
-    {:ok, %{queue: :queue.new(), proving: false, elf: elf, port: nil, current_block: nil}}
+    zisk_action = resolve_zisk_action()
+
+    # :execute is for fast local debugging; it runs without generating or reporting proofs.
+    if zisk_action != :prove do
+      Logger.info(
+        "ZisK action set to #{zisk_action_label(zisk_action)}; proof reporting is disabled."
+      )
+    end
+
+    {:ok,
+     %{
+       queue: :queue.new(),
+       proving: false,
+       elf: elf,
+       port: nil,
+       current_block: nil,
+       zisk_action: zisk_action
+     }}
   end
 
   @impl true
   def handle_cast({:prove, block_number, input_path}, state) do
     new_queue = :queue.in({block_number, input_path}, state.queue)
 
-    case EthProofsClient.Rpc.queued_proof(block_number) do
-      {:ok, _proof_id} ->
-        :ok
+    if state.zisk_action == :prove do
+      case EthProofsClient.Rpc.queued_proof(block_number) do
+        {:ok, _proof_id} ->
+          :ok
 
-      {:error, reason} ->
-        Logger.error("Failed to queue proof for block #{block_number}: #{reason}")
+        {:error, reason} ->
+          Logger.error("Failed to queue proof for block #{block_number}: #{reason}")
+      end
     end
 
     if state.proving do
@@ -53,6 +73,7 @@ defmodule EthProofsClient.Prover do
     case :queue.out(queue) do
       {{:value, {block_number, input_path}}, new_queue} ->
         output_dir_path = Path.join(@output_dir, Integer.to_string(block_number))
+        zisk_action_label = zisk_action_label(state.zisk_action)
 
         # Create output directory if it doesn't exist
         File.mkdir_p!(output_dir_path)
@@ -63,17 +84,7 @@ defmodule EthProofsClient.Prover do
             [
               :binary,
               :exit_status,
-              args: [
-                "prove",
-                "-e",
-                state.elf,
-                "-i",
-                input_path,
-                "-o",
-                output_dir_path,
-                "-a",
-                "-u"
-              ]
+              args: zisk_args(state.zisk_action, state.elf, input_path, output_dir_path)
             ]
           )
 
@@ -85,16 +96,18 @@ defmodule EthProofsClient.Prover do
         # the queue, preventing the application from terminating.
         Process.link(port)
 
-        case EthProofsClient.Rpc.proving_proof(block_number) do
-          {:ok, _proof_id} ->
-            :ok
+        if state.zisk_action == :prove do
+          case EthProofsClient.Rpc.proving_proof(block_number) do
+            {:ok, _proof_id} ->
+              :ok
 
-          {:error, reason} ->
-            Logger.error("Failed to mark proving for block #{block_number}: #{reason}")
+            {:error, reason} ->
+              Logger.error("Failed to mark proving for block #{block_number}: #{reason}")
+          end
         end
 
         Logger.info(
-          "Started cargo-zisk prover for ELF: #{state.elf}, INPUT: #{input_path}, BLOCK: #{block_number}, PORT: #{inspect(port)}"
+          "Started cargo-zisk #{zisk_action_label} for ELF: #{state.elf}, INPUT: #{input_path}, BLOCK: #{block_number}, PORT: #{inspect(port)}"
         )
 
         {:noreply,
@@ -123,40 +136,55 @@ defmodule EthProofsClient.Prover do
   def handle_info({port, {:exit_status, status}}, state) do
     case Map.fetch(state, :port) do
       {:ok, ^port} ->
-        Logger.info("cargo-zisk exited with status: #{status}")
+        zisk_action_label = zisk_action_label(state.zisk_action)
+        Logger.info("cargo-zisk #{zisk_action_label} exited with status: #{status}")
 
-        case read_proof_data(state.current_block) do
-          {:ok, %{cycles: proving_cycles, time: proving_time, proof: proof, id: verifier_id}} ->
+        if state.zisk_action == :prove do
+          case read_proof_data(state.current_block) do
+            {:ok, %{cycles: proving_cycles, time: proving_time, proof: proof, id: verifier_id}} ->
+              Logger.info(
+                "Proved block #{state.current_block} in #{proving_time / 1000} seconds using #{proving_cycles} cycles"
+              )
+
+              case EthProofsClient.Rpc.proved_proof(
+                     state.current_block,
+                     proving_time,
+                     proving_cycles,
+                     proof,
+                     verifier_id
+                   ) do
+                {:ok, _proof_id} ->
+                  :ok
+
+                {:error, reason} ->
+                  Logger.error(
+                    "Failed to submit proved proof for block #{state.current_block}: #{reason}"
+                  )
+              end
+
+              # Process finished, trigger next item
+              send(self(), :prove_next)
+
+            {:error, reason} ->
+              Logger.error(
+                "Failed to read proof data for block #{state.current_block}: #{reason}. Call to EthProofsClient.Rpc.proved_proof skipped."
+              )
+
+              # Still trigger next to avoid blocking the queue
+              send(self(), :prove_next)
+          end
+        else
+          if status == 0 do
             Logger.info(
-              "Proved block #{state.current_block} in #{proving_time / 1000} seconds using #{proving_cycles} cycles"
+              "Executed block #{state.current_block} with cargo-zisk #{zisk_action_label}"
             )
-
-            case EthProofsClient.Rpc.proved_proof(
-                   state.current_block,
-                   proving_time,
-                   proving_cycles,
-                   proof,
-                   verifier_id
-                 ) do
-              {:ok, _proof_id} ->
-                :ok
-
-              {:error, reason} ->
-                Logger.error(
-                  "Failed to submit proved proof for block #{state.current_block}: #{reason}"
-                )
-            end
-
-            # Process finished, trigger next item
-            send(self(), :prove_next)
-
-          {:error, reason} ->
+          else
             Logger.error(
-              "Failed to read proof data for block #{state.current_block}: #{reason}. Call to EthProofsClient.Rpc.proved_proof skipped."
+              "Execution failed for block #{state.current_block} with cargo-zisk #{zisk_action_label} (status #{status})"
             )
+          end
 
-            # Still trigger next to avoid blocking the queue
-            send(self(), :prove_next)
+          send(self(), :prove_next)
         end
 
         {:noreply, %{state | port: nil, current_block: nil}}
@@ -168,7 +196,7 @@ defmodule EthProofsClient.Prover do
 
   @impl true
   def handle_info({:EXIT, _port, _reason}, state) do
-    Logger.warning("Port died, proving next input")
+    Logger.warning("Port died, processing next input")
 
     send(self(), :prove_next)
 
@@ -195,5 +223,35 @@ defmodule EthProofsClient.Prover do
     else
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp resolve_zisk_action do
+    action =
+      Application.get_env(:ethproofs_client, :zisk_action, @default_zisk_action)
+      |> to_string()
+      |> String.downcase()
+
+    case action do
+      "prove" ->
+        :prove
+
+      "execute" ->
+        :execute
+
+      other ->
+        Logger.warning("Unknown ZISK_ACTION=#{inspect(other)}, defaulting to prove.")
+        :prove
+    end
+  end
+
+  defp zisk_action_label(:prove), do: "prove"
+  defp zisk_action_label(:execute), do: "execute"
+
+  defp zisk_args(:prove, elf_path, input_path, output_dir_path) do
+    ["prove", "-e", elf_path, "-i", input_path, "-o", output_dir_path, "-a", "-u"]
+  end
+
+  defp zisk_args(:execute, elf_path, input_path, _output_dir_path) do
+    ["execute", "-e", elf_path, "-i", input_path, "-u"]
   end
 end

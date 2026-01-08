@@ -57,53 +57,41 @@ defmodule EthProofsClient.Rpc do
   end
 
   defp send_request(endpoint, body, persist_body \\ false) do
-    if !ethproofs_api_key() do
-      Logger.warning("ETHPROOFS_API_KEY not set, skipping RPC call to #{endpoint}")
+    if !ethproofs_api_key() or !ethproofs_cluster_id() or !ethproofs_rpc_url() do
+      Logger.warning("Missing ETHPROOFS_* env, skipping RPC call to #{endpoint}")
 
       {:ok, :skipped}
-    end
+    else
+      url = ethproofs_rpc_url() <> "/" <> endpoint
 
-    if !ethproofs_cluster_id() do
-      Logger.warning("ETHPROOFS_CLUSTER_ID not set, skipping RPC call to #{endpoint}")
+      encoded_body = Jason.encode!(body)
 
-      {:ok, :skipped}
-    end
+      if persist_body do
+        request_body_path =
+          Path.join([
+            @output_dir,
+            Integer.to_string(body.block_number),
+            Integer.to_string(body.block_number) <>
+              ".json"
+          ])
 
-    if !ethproofs_rpc_url() do
-      Logger.warning("ETHPROOFS_RPC_URL not set, skipping RPC call to #{endpoint}")
+        Logger.debug("Persisting request body for block #{body.block_number} to disk")
 
-      {:ok, :skipped}
-    end
+        File.write!(
+          request_body_path,
+          encoded_body
+        )
+      end
 
-    url = ethproofs_rpc_url() <> "/" <> endpoint
+      Logger.debug("Sending request to #{url} with body: #{encoded_body}")
 
-    encoded_body = Jason.encode!(body)
+      case post(url, encoded_body) do
+        {:ok, rsp} ->
+          handle_response(rsp)
 
-    if persist_body do
-      request_body_path =
-        Path.join([
-          @output_dir,
-          Integer.to_string(body.block_number),
-          Integer.to_string(body.block_number) <>
-            ".json"
-        ])
-
-      Logger.debug("Persisting request body for block #{body.block_number} to disk")
-
-      File.write!(
-        request_body_path,
-        encoded_body
-      )
-    end
-
-    Logger.debug("Sending request to #{url} with body: #{encoded_body}")
-
-    case post(url, encoded_body) do
-      {:ok, rsp} ->
-        handle_response(rsp)
-
-      {:error, reason} ->
-        {:error, "HTTP request failed: #{reason}"}
+        {:error, reason} ->
+          {:error, "HTTP request failed: #{reason}"}
+      end
     end
   end
 

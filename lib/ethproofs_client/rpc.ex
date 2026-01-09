@@ -24,17 +24,11 @@ defmodule EthProofsClient.Rpc do
   end
 
   def queued_proof(block_number) do
-    send_request("proofs/queued", %{
-      block_number: block_number,
-      cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id())
-    })
+    send_request("proofs/queued", %{block_number: block_number})
   end
 
   def proving_proof(block_number) do
-    send_request("proofs/proving", %{
-      block_number: block_number,
-      cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id())
-    })
+    send_request("proofs/proving", %{block_number: block_number})
   end
 
   def proved_proof(
@@ -46,7 +40,6 @@ defmodule EthProofsClient.Rpc do
       ) do
     body = %{
       block_number: block_number,
-      cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id()),
       proving_time: proving_time,
       proving_cycles: proving_cycles,
       proof: proof
@@ -57,53 +50,48 @@ defmodule EthProofsClient.Rpc do
   end
 
   defp send_request(endpoint, body, persist_body \\ false) do
-    if !ethproofs_api_key() do
-      Logger.warning("ETHPROOFS_API_KEY not set, skipping RPC call to #{endpoint}")
+    if !ethproofs_api_key() or !ethproofs_cluster_id() or !ethproofs_rpc_url() do
+      Logger.warning("Missing ETHPROOFS_* env, skipping RPC call to #{endpoint}")
 
       {:ok, :skipped}
-    end
+    else
+      body =
+        Map.put(
+          body,
+          :cluster_id,
+          String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id())
+        )
 
-    if !ethproofs_cluster_id() do
-      Logger.warning("ETHPROOFS_CLUSTER_ID not set, skipping RPC call to #{endpoint}")
+      url = ethproofs_rpc_url() <> "/" <> endpoint
 
-      {:ok, :skipped}
-    end
+      encoded_body = Jason.encode!(body)
 
-    if !ethproofs_rpc_url() do
-      Logger.warning("ETHPROOFS_RPC_URL not set, skipping RPC call to #{endpoint}")
+      if persist_body do
+        request_body_path =
+          Path.join([
+            @output_dir,
+            Integer.to_string(body.block_number),
+            Integer.to_string(body.block_number) <>
+              ".json"
+          ])
 
-      {:ok, :skipped}
-    end
+        Logger.debug("Persisting request body for block #{body.block_number} to disk")
 
-    url = ethproofs_rpc_url() <> "/" <> endpoint
+        File.write!(
+          request_body_path,
+          encoded_body
+        )
+      end
 
-    encoded_body = Jason.encode!(body)
+      Logger.debug("Sending request to #{url} with body: #{encoded_body}")
 
-    if persist_body do
-      request_body_path =
-        Path.join([
-          @output_dir,
-          Integer.to_string(body.block_number),
-          Integer.to_string(body.block_number) <>
-            ".json"
-        ])
+      case post(url, encoded_body) do
+        {:ok, rsp} ->
+          handle_response(rsp)
 
-      Logger.debug("Persisting request body for block #{body.block_number} to disk")
-
-      File.write!(
-        request_body_path,
-        encoded_body
-      )
-    end
-
-    Logger.debug("Sending request to #{url} with body: #{encoded_body}")
-
-    case post(url, encoded_body) do
-      {:ok, rsp} ->
-        handle_response(rsp)
-
-      {:error, reason} ->
-        {:error, "HTTP request failed: #{reason}"}
+        {:error, reason} ->
+          {:error, "HTTP request failed: #{reason}"}
+      end
     end
   end
 

@@ -17,6 +17,20 @@ defmodule EthProofsClient.Notifications do
     })
   end
 
+  def block_proving_result(block_number, result) when result in [:ok, :error] do
+    {event, message} =
+      case result do
+        :ok -> {:block_proved, "Block #{block_number} proved successfully"}
+        :error -> {:block_proving_failed, "Block #{block_number} proof failed"}
+      end
+
+    notify(event, %{
+      block_number: block_number,
+      status: result,
+      message: message
+    })
+  end
+
   def notify(event, payload) do
     if slack_enabled?() do
       Task.start(fn -> Slack.notify(event, payload) end)

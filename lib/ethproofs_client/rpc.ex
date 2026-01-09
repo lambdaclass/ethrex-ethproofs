@@ -24,17 +24,11 @@ defmodule EthProofsClient.Rpc do
   end
 
   def queued_proof(block_number) do
-    send_request("proofs/queued", %{
-      block_number: block_number,
-      cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id())
-    })
+    send_request("proofs/queued", %{block_number: block_number})
   end
 
   def proving_proof(block_number) do
-    send_request("proofs/proving", %{
-      block_number: block_number,
-      cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id())
-    })
+    send_request("proofs/proving", %{block_number: block_number})
   end
 
   def proved_proof(
@@ -46,7 +40,6 @@ defmodule EthProofsClient.Rpc do
       ) do
     body = %{
       block_number: block_number,
-      cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id()),
       proving_time: proving_time,
       proving_cycles: proving_cycles,
       proof: proof
@@ -62,6 +55,13 @@ defmodule EthProofsClient.Rpc do
 
       {:ok, :skipped}
     else
+      body =
+        Map.put(
+          body,
+          :cluster_id,
+          String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id())
+        )
+
       url = ethproofs_rpc_url() <> "/" <> endpoint
 
       encoded_body = Jason.encode!(body)

@@ -19,29 +19,28 @@ defmodule EthProofsClient.InputGenerator do
   def init(_state) do
     Process.send_after(self(), :fetch_latest_block_number, @block_fetch_interval)
 
-    {:ok, %{queue: :queue.new(), generating: false}}
+    # Track queued/generating blocks so we don't accidentally prove the same block twice.
+    {:ok, %{queue: :queue.new(), generating: false, in_flight: MapSet.new()}}
   end
 
   @impl true
   def handle_cast({:generate, block_number}, state) do
-    queue_list = :queue.to_list(state.queue)
-
-    if block_number not in queue_list do
+    if MapSet.member?(state.in_flight, block_number) do
+      Logger.info("Block #{block_number} already queued or generating")
+      {:noreply, state}
+    else
       new_queue = :queue.in(block_number, state.queue)
+      in_flight = MapSet.put(state.in_flight, block_number)
 
       if state.generating do
         Logger.info("Input generation already in progress, enqueued block number #{block_number}")
 
-        {:noreply, %{state | queue: new_queue}}
+        {:noreply, %{state | queue: new_queue, in_flight: in_flight}}
       else
         send(self(), :generate_next)
 
-        {:noreply, %{state | queue: new_queue, generating: true}}
+        {:noreply, %{state | queue: new_queue, generating: true, in_flight: in_flight}}
       end
-    else
-      Logger.info("Block #{block_number} already queued")
-
-      {:noreply, state}
     end
   end
 
@@ -86,7 +85,9 @@ defmodule EthProofsClient.InputGenerator do
   end
 
   @impl true
-  def handle_info({:generation_done, _block_number}, state) do
+  def handle_info({:generation_done, block_number}, state) do
+    state = %{state | in_flight: MapSet.delete(state.in_flight, block_number)}
+
     # Generation completed, check for next item
     if :queue.is_empty(state.queue) do
       {:noreply, %{state | generating: false}}

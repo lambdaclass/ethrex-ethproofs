@@ -38,7 +38,8 @@ defmodule EthProofsClient.Prover do
        elf: elf,
        port: nil,
        current_block: nil,
-       zisk_action: zisk_action
+       zisk_action: zisk_action,
+       proving_notification_sent: false
      }}
   end
 
@@ -111,7 +112,14 @@ defmodule EthProofsClient.Prover do
         )
 
         {:noreply,
-         %{state | queue: new_queue, proving: true, port: port, current_block: block_number}}
+         %{
+           state
+           | queue: new_queue,
+             proving: true,
+             port: port,
+             current_block: block_number,
+             proving_notification_sent: false
+         }}
 
       {:empty, _queue} ->
         # Queue is empty, stop proving
@@ -140,39 +148,54 @@ defmodule EthProofsClient.Prover do
         Logger.info("cargo-zisk #{zisk_action_label} exited with status: #{status}")
 
         if state.zisk_action == :prove do
-          case read_proof_data(state.current_block) do
-            {:ok, %{cycles: proving_cycles, time: proving_time, proof: proof, id: verifier_id}} ->
-              Logger.info(
-                "Proved block #{state.current_block} in #{proving_time / 1000} seconds using #{proving_cycles} cycles"
-              )
+          state =
+            cond do
+              status != 0 ->
+                Logger.error(
+                  "Proof failed for block #{state.current_block} with cargo-zisk #{zisk_action_label} (status #{status})"
+                )
 
-              case EthProofsClient.Rpc.proved_proof(
-                     state.current_block,
-                     proving_time,
-                     proving_cycles,
-                     proof,
-                     verifier_id
-                   ) do
-                {:ok, _proof_id} ->
-                  :ok
+                maybe_notify_proving_result(state, :error)
 
-                {:error, reason} ->
-                  Logger.error(
-                    "Failed to submit proved proof for block #{state.current_block}: #{reason}"
-                  )
-              end
+              true ->
+                case read_proof_data(state.current_block) do
+                  {:ok,
+                   %{cycles: proving_cycles, time: proving_time, proof: proof, id: verifier_id}} ->
+                    Logger.info(
+                      "Proved block #{state.current_block} in #{proving_time / 1000} seconds using #{proving_cycles} cycles"
+                    )
 
-              # Process finished, trigger next item
-              send(self(), :prove_next)
+                    case EthProofsClient.Rpc.proved_proof(
+                           state.current_block,
+                           proving_time,
+                           proving_cycles,
+                           proof,
+                           verifier_id
+                         ) do
+                      {:ok, _proof_id} ->
+                        maybe_notify_proving_result(state, :ok)
 
-            {:error, reason} ->
-              Logger.error(
-                "Failed to read proof data for block #{state.current_block}: #{reason}. Call to EthProofsClient.Rpc.proved_proof skipped."
-              )
+                      {:error, reason} ->
+                        Logger.error(
+                          "Failed to submit proved proof for block #{state.current_block}: #{reason}"
+                        )
 
-              # Still trigger next to avoid blocking the queue
-              send(self(), :prove_next)
-          end
+                        maybe_notify_proving_result(state, :error)
+                    end
+
+                  {:error, reason} ->
+                    Logger.error(
+                      "Failed to read proof data for block #{state.current_block}: #{reason}. Call to EthProofsClient.Rpc.proved_proof skipped."
+                    )
+
+                    maybe_notify_proving_result(state, :error)
+                end
+            end
+
+          # Process finished, trigger next item
+          send(self(), :prove_next)
+
+          {:noreply, %{state | port: nil, current_block: nil}}
         else
           execution_result =
             if status == 0 do
@@ -195,9 +218,9 @@ defmodule EthProofsClient.Prover do
           )
 
           send(self(), :prove_next)
-        end
 
-        {:noreply, %{state | port: nil, current_block: nil}}
+          {:noreply, %{state | port: nil, current_block: nil}}
+        end
 
       _ ->
         {:noreply, state}
@@ -205,12 +228,18 @@ defmodule EthProofsClient.Prover do
   end
 
   @impl true
-  def handle_info({:EXIT, _port, _reason}, state) do
-    Logger.warning("Port died, processing next input")
+  def handle_info({:EXIT, port, _reason}, state) do
+    if state.port == port and not is_nil(state.current_block) do
+      Logger.warning("Port died, processing next input")
 
-    send(self(), :prove_next)
+      state = maybe_notify_proving_result(state, :error)
 
-    {:noreply, %{state | port: nil, current_block: nil}}
+      send(self(), :prove_next)
+
+      {:noreply, %{state | port: nil, current_block: nil}}
+    else
+      {:noreply, state}
+    end
   end
 
   defp read_proof_data(block_number) do
@@ -218,21 +247,33 @@ defmodule EthProofsClient.Prover do
 
     result_path = Path.join([@output_dir, block_dir, "result.json"])
 
-    proof_path = Path.join([@output_dir, block_dir, "vadcop_final_proof.compressed.bin"])
+    proof_paths = [
+      Path.join([@output_dir, block_dir, "vadcop_final_proof.compressed.bin"]),
+      Path.join([@output_dir, block_dir, "vadcop_final_proof.bin"])
+    ]
 
     with {:ok, result_content} <- File.read(result_path),
          {:ok, %{"cycles" => cycles, "time" => time, "id" => id}} <- Jason.decode(result_content),
-         {:ok, proof_binary} <- File.read(proof_path) do
+         {:ok, proof_binary} <- read_first_file(proof_paths) do
       {:ok,
        %{
          cycles: cycles,
          time: trunc(time * 1000),
          proof: Base.encode64(proof_binary, padding: false) |> String.replace(~r/\s+/, ""),
          id: id
-       }}
+      }}
     else
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp read_first_file(paths) do
+    Enum.reduce_while(paths, {:error, :enoent}, fn path, _acc ->
+      case File.read(path) do
+        {:ok, contents} -> {:halt, {:ok, contents}}
+        {:error, _reason} -> {:cont, {:error, :enoent}}
+      end
+    end)
   end
 
   defp resolve_zisk_action do
@@ -263,5 +304,15 @@ defmodule EthProofsClient.Prover do
 
   defp zisk_args(:execute, elf_path, input_path, _output_dir_path) do
     ["execute", "-e", elf_path, "-i", input_path, "-u"]
+  end
+
+  defp maybe_notify_proving_result(state, result) when result in [:ok, :error] do
+    if state.zisk_action == :prove and is_integer(state.current_block) and
+         not state.proving_notification_sent do
+      EthProofsClient.Notifications.block_proving_result(state.current_block, result)
+      %{state | proving_notification_sent: true}
+    else
+      state
+    end
   end
 end

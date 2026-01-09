@@ -111,15 +111,15 @@ defmodule EthProofsClient.Prover do
           "Started cargo-zisk #{zisk_action_label} for ELF: #{state.elf}, INPUT: #{input_path}, BLOCK: #{block_number}, PORT: #{inspect(port)}"
         )
 
-        {:noreply,
-         %{
-           state
-           | queue: new_queue,
-             proving: true,
-             port: port,
-             current_block: block_number,
-             proving_notification_sent: false
-         }}
+        state =
+          state
+          |> Map.put(:queue, new_queue)
+          |> Map.put(:proving, true)
+          |> Map.put(:port, port)
+          |> Map.put(:current_block, block_number)
+          |> Map.put(:proving_notification_sent, false)
+
+        {:noreply, state}
 
       {:empty, _queue} ->
         # Queue is empty, stop proving

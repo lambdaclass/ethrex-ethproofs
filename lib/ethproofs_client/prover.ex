@@ -1,185 +1,222 @@
 defmodule EthProofsClient.Prover do
+  @moduledoc """
+  GenServer that manages a queue of blocks to prove using cargo-zisk.
+
+  ## State Machine
+
+  The prover operates as a state machine with two states:
+  - `:idle` - No proof in progress, ready to process next item
+  - `{:proving, block_number, port}` - Currently proving a block
+  """
+
   use GenServer
   require Logger
 
   @output_dir "output"
 
+  defstruct [
+    :status,
+    :elf,
+    queue: :queue.new(),
+    queued_blocks: MapSet.new()
+  ]
+
+  # --- Public API ---
+
   def start_link(elf_path, _opts \\ []) do
     GenServer.start_link(__MODULE__, %{elf: elf_path}, name: __MODULE__)
   end
 
+  @doc """
+  Enqueue a block for proving. Duplicates are automatically ignored.
+  """
   def prove(block_number, input_path) do
     GenServer.cast(__MODULE__, {:prove, block_number, input_path})
   end
 
+  @doc """
+  Get the current status of the prover for debugging/monitoring.
+  """
+  def status do
+    GenServer.call(__MODULE__, :status)
+  end
+
+  # --- Callbacks ---
+
   @impl true
   def init(%{elf: elf}) do
-    # By setting Process.flag(:trap_exit, true) in the init function and
-    # linking the port with Process.link(port) after opening it, the
-    # GenServer will now properly handle port exits without crashing. When
-    # cargo-zisk dies due to an OOM (or any other reason), the GenServer
-    # receives an {:EXIT, port, reason} message and continues processing
-    # the queue, preventing the application from terminating.
     Process.flag(:trap_exit, true)
-    {:ok, %{queue: :queue.new(), proving: false, elf: elf, port: nil, current_block: nil}}
+    {:ok, %__MODULE__{status: :idle, elf: elf}}
+  end
+
+  @impl true
+  def handle_call(:status, _from, state) do
+    status_info = %{
+      status: sanitize_status(state.status),
+      queue_length: :queue.len(state.queue),
+      queued_blocks: MapSet.to_list(state.queued_blocks)
+    }
+
+    {:reply, status_info, state}
   end
 
   @impl true
   def handle_cast({:prove, block_number, input_path}, state) do
-    new_queue = :queue.in({block_number, input_path}, state.queue)
+    cond do
+      MapSet.member?(state.queued_blocks, block_number) ->
+        Logger.debug("Block #{block_number} already queued, skipping")
+        {:noreply, state}
 
-    case EthProofsClient.Rpc.queued_proof(block_number) do
-      {:ok, _proof_id} ->
-        :ok
+      currently_proving?(state, block_number) ->
+        Logger.debug("Block #{block_number} already proving, skipping")
+        {:noreply, state}
 
-      {:error, reason} ->
-        Logger.error("Failed to queue proof for block #{block_number}: #{reason}")
-    end
-
-    if state.proving do
-      Logger.info(
-        "Proving already in progress, enqueued input path #{input_path} for block #{block_number}"
-      )
-
-      {:noreply, %{state | queue: new_queue}}
-    else
-      send(self(), :prove_next)
-      {:noreply, %{state | queue: new_queue, proving: true}}
+      true ->
+        report_queued(block_number)
+        new_state = enqueue(state, block_number, input_path)
+        {:noreply, maybe_start_next(new_state)}
     end
   end
 
+  # Handle port data output (logging only)
   @impl true
-  def handle_info(:prove_next, %{queue: queue} = state) do
+  def handle_info({port, {:data, data}}, %{status: {:proving, _block_number, port}} = state) do
+    Logger.debug("cargo-zisk output: #{data}")
+    {:noreply, state}
+  end
+
+  # Handle normal port exit - this is the primary completion handler
+  @impl true
+  def handle_info(
+        {port, {:exit_status, status}},
+        %{status: {:proving, block_number, port}} = state
+      ) do
+    Logger.info("cargo-zisk exited with status #{status} for block #{block_number}")
+
+    # Unlink immediately to prevent receiving duplicate EXIT message
+    Process.unlink(port)
+
+    new_state = handle_proof_completion(state, block_number, status)
+    {:noreply, maybe_start_next(new_state)}
+  end
+
+  # Handle abnormal port termination (only if exit_status wasn't received)
+  @impl true
+  def handle_info({:EXIT, port, reason}, %{status: {:proving, block_number, port}} = state) do
+    Logger.warning(
+      "Port died unexpectedly for block #{block_number}: #{inspect(reason)}. Continuing with next item."
+    )
+
+    new_state = %{state | status: :idle}
+    {:noreply, maybe_start_next(new_state)}
+  end
+
+  # Ignore messages from unknown/old ports
+  @impl true
+  def handle_info({port, {:data, _data}}, state) when is_port(port) do
+    Logger.debug("Ignoring data from unknown port: #{inspect(port)}")
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({port, {:exit_status, _status}}, state) when is_port(port) do
+    Logger.debug("Ignoring exit_status from unknown port: #{inspect(port)}")
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:EXIT, port, _reason}, state) when is_port(port) do
+    Logger.debug("Ignoring EXIT from unknown port: #{inspect(port)}")
+    {:noreply, state}
+  end
+
+  # --- Private Functions ---
+
+  defp currently_proving?(%{status: {:proving, block_number, _port}}, block_number), do: true
+  defp currently_proving?(_state, _block_number), do: false
+
+  defp enqueue(state, block_number, input_path) do
+    Logger.info("Enqueued block #{block_number} for proving (input: #{input_path})")
+
+    %{
+      state
+      | queue: :queue.in({block_number, input_path}, state.queue),
+        queued_blocks: MapSet.put(state.queued_blocks, block_number)
+    }
+  end
+
+  defp maybe_start_next(%{status: :idle, queue: queue} = state) do
     case :queue.out(queue) do
       {{:value, {block_number, input_path}}, new_queue} ->
-        output_dir_path = Path.join(@output_dir, Integer.to_string(block_number))
-
-        # Create output directory if it doesn't exist
-        File.mkdir_p!(output_dir_path)
-
-        port =
-          Port.open(
-            {:spawn_executable, System.find_executable("cargo-zisk")},
-            [
-              :binary,
-              :exit_status,
-              args: [
-                "prove",
-                "-e",
-                state.elf,
-                "-i",
-                input_path,
-                "-o",
-                output_dir_path,
-                "-a",
-                "-u"
-              ]
-            ]
-          )
-
-        # By setting Process.flag(:trap_exit, true) in the init function and
-        # linking the port with Process.link(port) after opening it, the
-        # GenServer will now properly handle port exits without crashing. When
-        # cargo-zisk dies due to an OOM (or any other reason), the GenServer
-        # receives an {:EXIT, port, reason} message and continues processing
-        # the queue, preventing the application from terminating.
+        port = start_prover(state.elf, block_number, input_path)
         Process.link(port)
-
-        case EthProofsClient.Rpc.proving_proof(block_number) do
-          {:ok, _proof_id} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.error("Failed to mark proving for block #{block_number}: #{reason}")
-        end
+        report_proving(block_number)
 
         Logger.info(
-          "Started cargo-zisk prover for ELF: #{state.elf}, INPUT: #{input_path}, BLOCK: #{block_number}, PORT: #{inspect(port)}"
+          "Started cargo-zisk prover for block #{block_number} (ELF: #{state.elf}, INPUT: #{input_path}, PORT: #{inspect(port)})"
         )
 
-        {:noreply,
-         %{state | queue: new_queue, proving: true, port: port, current_block: block_number}}
+        %{
+          state
+          | status: {:proving, block_number, port},
+            queue: new_queue,
+            queued_blocks: MapSet.delete(state.queued_blocks, block_number)
+        }
 
       {:empty, _queue} ->
-        # Queue is empty, stop proving
-        {:noreply, %{state | proving: false}}
+        Logger.debug("Proof queue is empty, prover is idle")
+        state
     end
   end
 
-  @impl true
-  def handle_info({port, {:data, data}}, state) do
-    case Map.fetch(state, :port) do
-      {:ok, ^port} ->
-        Logger.debug("cargo-zisk output: #{data}")
+  # Already proving, do nothing
+  defp maybe_start_next(state), do: state
 
-        {:noreply, state}
+  defp start_prover(elf, block_number, input_path) do
+    output_dir = Path.join(@output_dir, Integer.to_string(block_number))
+    File.mkdir_p!(output_dir)
 
-      _ ->
-        {:noreply, state}
-    end
+    Port.open(
+      {:spawn_executable, System.find_executable("cargo-zisk")},
+      [
+        :binary,
+        :exit_status,
+        args: [
+          "prove",
+          "-e",
+          elf,
+          "-i",
+          input_path,
+          "-o",
+          output_dir,
+          "-a",
+          "-u"
+        ]
+      ]
+    )
   end
 
-  @impl true
-  def handle_info({port, {:exit_status, status}}, state) do
-    case Map.fetch(state, :port) do
-      {:ok, ^port} ->
-        Logger.info("cargo-zisk exited with status: #{status}")
+  defp handle_proof_completion(state, block_number, exit_status) do
+    case read_proof_data(block_number) do
+      {:ok, proof_data} ->
+        Logger.info(
+          "Proved block #{block_number} in #{proof_data.time / 1000} seconds using #{proof_data.cycles} cycles"
+        )
 
-        case read_proof_data(state.current_block) do
-          {:ok, %{cycles: proving_cycles, time: proving_time, proof: proof, id: verifier_id}} ->
-            Logger.info(
-              "Proved block #{state.current_block} in #{proving_time / 1000} seconds using #{proving_cycles} cycles"
-            )
+        report_proved(block_number, proof_data)
 
-            case EthProofsClient.Rpc.proved_proof(
-                   state.current_block,
-                   proving_time,
-                   proving_cycles,
-                   proof,
-                   verifier_id
-                 ) do
-              {:ok, _proof_id} ->
-                :ok
-
-              {:error, reason} ->
-                Logger.error(
-                  "Failed to submit proved proof for block #{state.current_block}: #{reason}"
-                )
-            end
-
-            # Process finished, trigger next item
-            send(self(), :prove_next)
-
-          {:error, reason} ->
-            Logger.error(
-              "Failed to read proof data for block #{state.current_block}: #{reason}. Call to EthProofsClient.Rpc.proved_proof skipped."
-            )
-
-            # Still trigger next to avoid blocking the queue
-            send(self(), :prove_next)
-        end
-
-        {:noreply, %{state | port: nil, current_block: nil}}
-
-      _ ->
-        {:noreply, state}
+      {:error, reason} ->
+        Logger.error(
+          "Failed to read proof data for block #{block_number} (exit_status: #{exit_status}): #{inspect(reason)}"
+        )
     end
-  end
 
-  @impl true
-  def handle_info({:EXIT, _port, _reason}, state) do
-    Logger.warning("Port died, proving next input")
-
-    send(self(), :prove_next)
-
-    {:noreply, %{state | port: nil, current_block: nil}}
+    %{state | status: :idle}
   end
 
   defp read_proof_data(block_number) do
     block_dir = Integer.to_string(block_number)
-
     result_path = Path.join([@output_dir, block_dir, "result.json"])
-
     proof_path = Path.join([@output_dir, block_dir, "vadcop_final_proof.compressed.bin"])
 
     with {:ok, result_content} <- File.read(result_path),
@@ -190,10 +227,52 @@ defmodule EthProofsClient.Prover do
          cycles: cycles,
          time: trunc(time * 1000),
          proof: Base.encode64(proof_binary, padding: false) |> String.replace(~r/\s+/, ""),
-         id: id
+         verifier_id: id
        }}
     else
       {:error, reason} -> {:error, reason}
+      error -> {:error, error}
+    end
+  end
+
+  defp sanitize_status(:idle), do: :idle
+  defp sanitize_status({:proving, block_number, _port}), do: {:proving, block_number}
+
+  # --- API Reporting Functions ---
+
+  defp report_queued(block_number) do
+    case EthProofsClient.Rpc.queued_proof(block_number) do
+      {:ok, _proof_id} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Failed to report queued status for block #{block_number}: #{reason}")
+    end
+  end
+
+  defp report_proving(block_number) do
+    case EthProofsClient.Rpc.proving_proof(block_number) do
+      {:ok, _proof_id} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Failed to report proving status for block #{block_number}: #{reason}")
+    end
+  end
+
+  defp report_proved(block_number, proof_data) do
+    case EthProofsClient.Rpc.proved_proof(
+           block_number,
+           proof_data.time,
+           proof_data.cycles,
+           proof_data.proof,
+           proof_data.verifier_id
+         ) do
+      {:ok, _proof_id} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Failed to report proved status for block #{block_number}: #{reason}")
     end
   end
 end

@@ -8,7 +8,8 @@ defmodule EthProofsClient.Application do
   EthProofsClient.Supervisor (strategy: :rest_for_one)
   ├── EthProofsClient.TaskSupervisor (Task.Supervisor)
   ├── EthProofsClient.Prover (GenServer)
-  └── EthProofsClient.InputGenerator (GenServer)
+  ├── EthProofsClient.InputGenerator (GenServer)
+  └── Bandit (HTTP server for health endpoints)
   ```
 
   Uses `:rest_for_one` strategy so that if TaskSupervisor crashes,
@@ -16,25 +17,42 @@ defmodule EthProofsClient.Application do
   """
 
   use Application
+  require Logger
 
-  alias EthProofsClient.Prover
+  alias EthProofsClient.HealthRouter
   alias EthProofsClient.InputGenerator
+  alias EthProofsClient.Prover
+
+  @default_health_port 4000
 
   def start(_type, _args) do
     elf_path =
       Application.get_env(:ethproofs_client, :elf_path) ||
         raise "ELF_PATH environment variable must be set"
 
+    health_port = get_health_port()
+
     children = [
       # TaskSupervisor must start first - InputGenerator depends on it
       {Task.Supervisor, name: EthProofsClient.TaskSupervisor},
       {Prover, elf_path},
-      {InputGenerator, []}
+      {InputGenerator, []},
+      # Health endpoint HTTP server
+      {Plug.Cowboy, scheme: :http, plug: HealthRouter, options: [port: health_port]}
     ]
+
+    Logger.info("Starting health endpoint on http://0.0.0.0:#{health_port}/health")
 
     # :rest_for_one ensures that if TaskSupervisor crashes,
     # Prover and InputGenerator are restarted too
     opts = [strategy: :rest_for_one, name: EthProofsClient.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  defp get_health_port do
+    case System.get_env("HEALTH_PORT") do
+      nil -> @default_health_port
+      port_str -> String.to_integer(port_str)
+    end
   end
 end

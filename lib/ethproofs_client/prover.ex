@@ -17,6 +17,7 @@ defmodule EthProofsClient.Prover do
   defstruct [
     :status,
     :elf,
+    :proving_since,
     queue: :queue.new(),
     queued_blocks: MapSet.new()
   ]
@@ -54,7 +55,9 @@ defmodule EthProofsClient.Prover do
     status_info = %{
       status: sanitize_status(state.status),
       queue_length: :queue.len(state.queue),
-      queued_blocks: MapSet.to_list(state.queued_blocks)
+      queued_blocks: MapSet.to_list(state.queued_blocks),
+      proving_since: state.proving_since,
+      proving_duration_seconds: proving_duration(state)
     }
 
     {:reply, status_info, state}
@@ -107,7 +110,7 @@ defmodule EthProofsClient.Prover do
       "Port died unexpectedly for block #{block_number}: #{inspect(reason)}. Continuing with next item."
     )
 
-    new_state = %{state | status: :idle}
+    new_state = %{state | status: :idle, proving_since: nil}
     {:noreply, maybe_start_next(new_state)}
   end
 
@@ -160,7 +163,8 @@ defmodule EthProofsClient.Prover do
           state
           | status: {:proving, block_number, port},
             queue: new_queue,
-            queued_blocks: MapSet.delete(state.queued_blocks, block_number)
+            queued_blocks: MapSet.delete(state.queued_blocks, block_number),
+            proving_since: DateTime.utc_now()
         }
 
       {:empty, _queue} ->
@@ -211,7 +215,7 @@ defmodule EthProofsClient.Prover do
         )
     end
 
-    %{state | status: :idle}
+    %{state | status: :idle, proving_since: nil}
   end
 
   defp read_proof_data(block_number) do
@@ -237,6 +241,12 @@ defmodule EthProofsClient.Prover do
 
   defp sanitize_status(:idle), do: :idle
   defp sanitize_status({:proving, block_number, _port}), do: {:proving, block_number}
+
+  defp proving_duration(%{proving_since: nil}), do: nil
+
+  defp proving_duration(%{proving_since: since}) do
+    DateTime.diff(DateTime.utc_now(), since, :second)
+  end
 
   # --- API Reporting Functions ---
 

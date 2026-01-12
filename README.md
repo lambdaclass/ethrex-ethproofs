@@ -264,8 +264,79 @@ A `Task.Supervisor` that supervises async tasks spawned by InputGenerator.
 | `ETHPROOFS_API_KEY` | No | EthProofs API authentication token |
 | `ETHPROOFS_CLUSTER_ID` | No | EthProofs cluster identifier |
 | `LOG_LEVEL` | No | Logging level (`debug`, `info`, `warning`, `error`) |
+| `HEALTH_PORT` | No | Port for health HTTP endpoint (default: 4000) |
+| `PROVER_STUCK_THRESHOLD_SECONDS` | No | Seconds before prover is considered stuck (default: 3600). Increase for multi-GPU setups. |
 
 > **Note:** If `ETHPROOFS_*` variables are not set, the client will still generate proofs but won't report them to the EthProofs API.
+
+### Health Endpoint
+
+The application exposes HTTP health endpoints for monitoring and orchestration (e.g., Kubernetes probes).
+
+**Endpoints:**
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Full health status with component details |
+| `GET /health/ready` | Readiness probe (200 if ready, 503 if not) |
+| `GET /health/live` | Liveness probe (always 200 if server is up) |
+
+**Status Levels:**
+
+| Status | Meaning | HTTP Code |
+|--------|---------|-----------|
+| `healthy` | All components up and working normally | 200 |
+| `degraded` | Components up but prover stuck (proving > threshold) | 503 |
+| `unhealthy` | One or more components down | 503 |
+
+**Example Response (`GET /health`):**
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2025-01-12T15:30:00Z",
+  "uptime_seconds": 3600,
+  "components": {
+    "prover": {
+      "status": "up",
+      "state": "proving_21500000",
+      "queue_length": 2,
+      "queued_blocks": [21500100, 21500200],
+      "proving_since": "2025-01-12T15:00:00Z",
+      "proving_duration_seconds": 1800
+    },
+    "input_generator": {
+      "status": "up",
+      "state": "idle",
+      "queue_length": 0,
+      "queued_blocks": [],
+      "processed_count": 15
+    },
+    "task_supervisor": {
+      "status": "up",
+      "pid": "#PID<0.250.0>",
+      "active_tasks": 0
+    }
+  },
+  "system": {
+    "beam_memory_mb": 128.5,
+    "process_count": 85,
+    "scheduler_count": 8,
+    "otp_release": "28"
+  }
+}
+```
+
+**Usage:**
+
+```bash
+# Check full health status
+curl http://<host>:4000/health | jq
+
+# Check readiness and liveness
+curl -f http://<host>:4000/health/ready  # Returns 503 if not ready
+curl -f http://<host>:4000/health/live   # Returns 200 if alive
+```
 
 ### Output Files
 

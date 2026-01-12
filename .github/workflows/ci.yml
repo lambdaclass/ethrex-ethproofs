@@ -27,7 +27,7 @@ jobs:
           otp-version: ${{ env.OTP_VERSION }}
 
       - name: Set up Rust
-        uses: dtolnay/rust-action@stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Elixir deps
         uses: actions/cache@v4
@@ -39,19 +39,6 @@ jobs:
           key: ${{ runner.os }}-mix-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
             ${{ runner.os }}-mix-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-
-
-      - name: Cache Rust deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            native/ethrex_ethproofs_input_generator/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
 
       - name: Install dependencies
         run: mix deps.get
@@ -94,7 +81,7 @@ jobs:
           otp-version: ${{ env.OTP_VERSION }}
 
       - name: Set up Rust
-        uses: dtolnay/rust-action@stable
+        uses: ./.github/actions/setup-rust
 
       - name: Cache Elixir deps
         uses: actions/cache@v4

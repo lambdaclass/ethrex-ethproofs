@@ -19,7 +19,6 @@ defmodule EthProofsClient.InputGenerator do
   def init(_state) do
     Process.send_after(self(), :fetch_latest_block_number, @block_fetch_interval)
 
-    # Track queued/generating blocks so we don't accidentally prove the same block twice.
     {:ok, %{queue: :queue.new(), generating: false, in_flight: MapSet.new()}}
   end
 
@@ -30,6 +29,8 @@ defmodule EthProofsClient.InputGenerator do
       {:noreply, state}
     else
       new_queue = :queue.in(block_number, state.queue)
+
+      # Track queued/generating blocks so we don't accidentally prove the same block twice.
       in_flight = MapSet.put(state.in_flight, block_number)
 
       if state.generating do

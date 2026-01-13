@@ -12,6 +12,8 @@ defmodule EthProofsClient.Prover do
   use GenServer
   require Logger
 
+  alias EthProofsClient.Notifications
+
   @output_dir "output"
   @default_zisk_action "prove"
 
@@ -219,18 +221,43 @@ defmodule EthProofsClient.Prover do
   end
 
   defp handle_proof_completion(state, block_number, exit_status) do
+    if exit_status != 0 do
+      Notifications.proof_generation_failed(
+        block_number,
+        "cargo-zisk exited with status #{exit_status}"
+      )
+    end
+
     case read_proof_data(block_number) do
       {:ok, proof_data} ->
         Logger.info(
           "Proved block #{block_number} in #{proof_data.time / 1000} seconds using #{proof_data.cycles} cycles"
         )
 
-        report_proved(block_number, proof_data)
+        case report_proved(block_number, proof_data) do
+          {:ok, _proof_id} ->
+            if exit_status == 0 do
+              Notifications.proof_submitted(block_number, proof_data.time)
+            end
+
+          {:ok, :skipped} ->
+            :ok
+
+          {:error, _reason} ->
+            :ok
+        end
 
       {:error, reason} ->
         Logger.error(
           "Failed to read proof data for block #{block_number} (exit_status: #{exit_status}): #{inspect(reason)}"
         )
+
+        if exit_status == 0 do
+          Notifications.proof_data_failed(
+            block_number,
+            "exit_status #{exit_status}: #{inspect(reason)}"
+          )
+        end
     end
 
     %{state | status: :idle, proving_since: nil}
@@ -329,8 +356,12 @@ defmodule EthProofsClient.Prover do
       {:ok, _proof_id} ->
         :ok
 
+      {:ok, :skipped} ->
+        :ok
+
       {:error, reason} ->
         Logger.error("Failed to report queued status for block #{block_number}: #{reason}")
+        Notifications.ethproofs_request_failed(block_number, "queued", reason)
     end
   end
 
@@ -339,8 +370,12 @@ defmodule EthProofsClient.Prover do
       {:ok, _proof_id} ->
         :ok
 
+      {:ok, :skipped} ->
+        :ok
+
       {:error, reason} ->
         Logger.error("Failed to report proving status for block #{block_number}: #{reason}")
+        Notifications.ethproofs_request_failed(block_number, "proving", reason)
     end
   end
 
@@ -352,11 +387,16 @@ defmodule EthProofsClient.Prover do
            proof_data.proof,
            proof_data.verifier_id
          ) do
-      {:ok, _proof_id} ->
-        :ok
+      {:ok, _proof_id} = ok ->
+        ok
 
-      {:error, reason} ->
+      {:ok, :skipped} = ok ->
+        ok
+
+      {:error, reason} = error ->
         Logger.error("Failed to report proved status for block #{block_number}: #{reason}")
+        Notifications.ethproofs_request_failed(block_number, "proved", reason)
+        error
     end
   end
 end

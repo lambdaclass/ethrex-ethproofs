@@ -265,6 +265,7 @@ A `Task.Supervisor` that supervises async tasks spawned by InputGenerator.
 | `ETHPROOFS_API_KEY` | No | EthProofs API authentication token |
 | `ETHPROOFS_CLUSTER_ID` | No | EthProofs cluster identifier |
 | `ZISK_ACTION` | No | ZisK action (`prove` or `execute`, default: `prove`) |
+| `SLACK_WEBHOOK` | No | Slack incoming webhook URL for notifications |
 | `LOG_LEVEL` | No | Logging level (`debug`, `info`, `warning`, `error`) |
 | `HEALTH_PORT` | No | Port for health HTTP endpoint (default: 4000) |
 | `PROVER_STUCK_THRESHOLD_SECONDS` | No | Seconds before prover is considered stuck (default: 3600). Increase for multi-GPU setups. |

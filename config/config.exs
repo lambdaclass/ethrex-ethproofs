@@ -9,7 +9,8 @@ config :ethproofs_client,
   zisk_action: System.get_env("ZISK_ACTION", "prove"),
   ethproofs_rpc_url: System.get_env("ETHPROOFS_RPC_URL"),
   ethproofs_api_key: System.get_env("ETHPROOFS_API_KEY"),
-  ethproofs_cluster_id: System.get_env("ETHPROOFS_CLUSTER_ID")
+  ethproofs_cluster_id: System.get_env("ETHPROOFS_CLUSTER_ID"),
+  slack_webhook: System.get_env("SLACK_WEBHOOK")
 
 # Import environment specific config
 import_config "#{config_env()}.exs"

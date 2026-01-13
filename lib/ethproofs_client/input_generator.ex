@@ -18,6 +18,7 @@ defmodule EthProofsClient.InputGenerator do
   use GenServer
   require Logger
 
+  alias EthProofsClient.Notifications
   alias EthProofsClient.Prover
 
   @block_fetch_interval 2_000
@@ -104,6 +105,7 @@ defmodule EthProofsClient.InputGenerator do
 
       {:error, reason} ->
         Logger.error("Failed to generate input for block #{block_number}: #{inspect(reason)}")
+        Notifications.input_generation_failed(block_number, reason)
     end
 
     new_state = %{

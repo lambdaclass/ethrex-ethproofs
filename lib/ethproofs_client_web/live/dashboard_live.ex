@@ -31,21 +31,16 @@ defmodule EthProofsClientWeb.DashboardLive do
     socket =
       socket
       |> assign(:page_title, "Dashboard")
+      |> assign(:next_block_info, nil)
       |> assign_status()
       |> assign_proved_blocks()
-      |> assign_next_block_info()
 
     {:ok, socket}
   end
 
   @impl true
   def handle_info(:refresh, socket) do
-    socket =
-      socket
-      |> assign_status()
-      |> assign_next_block_info()
-
-    {:noreply, socket}
+    {:noreply, assign_status(socket)}
   end
 
   @impl true
@@ -87,13 +82,6 @@ defmodule EthProofsClientWeb.DashboardLive do
     assign(socket, :proved_blocks, blocks)
   end
 
-  defp assign_next_block_info(socket) do
-    generator_status = socket.assigns[:generator_status] || %{}
-    # Extract next block estimate from generator if available
-    # This will be updated when we have the next block info broadcast
-    assign(socket, :next_block_info, Map.get(generator_status, :next_block_estimate))
-  end
-
   defp safe_call(module, function, args \\ []) do
     apply(module, function, args)
   rescue
@@ -106,10 +94,36 @@ defmodule EthProofsClientWeb.DashboardLive do
   def render(assigns) do
     ~H"""
     <div class="space-y-8">
-      <%!-- Header with countdown --%>
+      <%!-- Header with current block info --%>
       <section class="text-center py-8">
-        <h2 class="text-3xl font-bold text-white mb-2">Proof Generation Status</h2>
-        <p class="text-slate-400">Real-time monitoring of Ethereum block proof generation</p>
+        <h2 class="text-3xl font-bold text-white mb-4">Proof Generation Status</h2>
+
+        <div :if={@next_block_info} class="inline-flex items-center gap-8 bg-slate-800/60 border border-slate-700/50 rounded-xl px-8 py-4">
+          <div class="text-left">
+            <div class="text-sm text-slate-400">Current Block</div>
+            <div class="text-2xl font-bold text-white font-mono">
+              <%= @next_block_info.current_block %>
+            </div>
+          </div>
+          <div class="w-px h-12 bg-slate-700"></div>
+          <div class="text-left">
+            <div class="text-sm text-slate-400">Next Target Block</div>
+            <div class="text-2xl font-bold text-cyan-400 font-mono">
+              <%= @next_block_info.next_target_block %>
+            </div>
+          </div>
+          <div class="w-px h-12 bg-slate-700"></div>
+          <div class="text-left">
+            <div class="text-sm text-slate-400">Estimated Time</div>
+            <div class="text-2xl font-bold text-white font-mono tabular-nums">
+              <%= format_countdown(@next_block_info.estimated_seconds) %>
+            </div>
+          </div>
+        </div>
+
+        <div :if={!@next_block_info} class="text-slate-500">
+          Waiting for block data...
+        </div>
       </section>
 
       <%!-- Metrics Row --%>
@@ -262,4 +276,13 @@ defmodule EthProofsClientWeb.DashboardLive do
   end
 
   defp format_duration_long(_), do: "-"
+
+  defp format_countdown(seconds) when is_integer(seconds) and seconds >= 0 do
+    minutes = div(seconds, 60)
+    secs = rem(seconds, 60)
+
+    "#{String.pad_leading(Integer.to_string(minutes), 2, "0")}:#{String.pad_leading(Integer.to_string(secs), 2, "0")}"
+  end
+
+  defp format_countdown(_), do: "--:--"
 end

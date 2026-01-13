@@ -221,11 +221,14 @@ defmodule EthProofsClient.Prover do
   defp read_proof_data(block_number) do
     block_dir = Integer.to_string(block_number)
     result_path = Path.join([@output_dir, block_dir, "result.json"])
-    proof_path = Path.join([@output_dir, block_dir, "vadcop_final_proof.compressed.bin"])
+    proof_paths = [
+      Path.join([@output_dir, block_dir, "vadcop_final_proof.compressed.bin"]),
+      Path.join([@output_dir, block_dir, "vadcop_final_proof.bin"])
+    ]
 
     with {:ok, result_content} <- File.read(result_path),
          {:ok, %{"cycles" => cycles, "time" => time, "id" => id}} <- Jason.decode(result_content),
-         {:ok, proof_binary} <- File.read(proof_path) do
+         {:ok, proof_binary} <- read_first_file(proof_paths) do
       {:ok,
        %{
          cycles: cycles,
@@ -237,6 +240,15 @@ defmodule EthProofsClient.Prover do
       {:error, reason} -> {:error, reason}
       error -> {:error, error}
     end
+  end
+
+  defp read_first_file(paths) do
+    Enum.reduce_while(paths, {:error, :enoent}, fn path, _acc ->
+      case File.read(path) do
+        {:ok, contents} -> {:halt, {:ok, contents}}
+        {:error, _reason} -> {:cont, {:error, :enoent}}
+      end
+    end)
   end
 
   defp sanitize_status(:idle), do: :idle

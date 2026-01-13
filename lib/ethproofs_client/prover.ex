@@ -13,11 +13,13 @@ defmodule EthProofsClient.Prover do
   require Logger
 
   @output_dir "output"
+  @default_zisk_action "prove"
 
   defstruct [
     :status,
     :elf,
     :proving_since,
+    :zisk_action,
     queue: :queue.new(),
     queued_blocks: MapSet.new()
   ]
@@ -47,7 +49,15 @@ defmodule EthProofsClient.Prover do
   @impl true
   def init(%{elf: elf}) do
     Process.flag(:trap_exit, true)
-    {:ok, %__MODULE__{status: :idle, elf: elf}}
+    zisk_action = resolve_zisk_action()
+
+    if zisk_action != :prove do
+      Logger.info(
+        "ZisK action set to #{zisk_action_label(zisk_action)}; proof reporting is disabled."
+      )
+    end
+
+    {:ok, %__MODULE__{status: :idle, elf: elf, zisk_action: zisk_action}}
   end
 
   @impl true
@@ -75,7 +85,10 @@ defmodule EthProofsClient.Prover do
         {:noreply, state}
 
       true ->
-        report_queued(block_number)
+        if state.zisk_action == :prove do
+          report_queued(block_number)
+        end
+
         new_state = enqueue(state, block_number, input_path)
         {:noreply, maybe_start_next(new_state)}
     end
@@ -94,12 +107,19 @@ defmodule EthProofsClient.Prover do
         {port, {:exit_status, status}},
         %{status: {:proving, block_number, port}} = state
       ) do
-    Logger.info("cargo-zisk exited with status #{status} for block #{block_number}")
+    Logger.info(
+      "cargo-zisk #{zisk_action_label(state.zisk_action)} exited with status #{status} for block #{block_number}"
+    )
 
     # Unlink immediately to prevent receiving duplicate EXIT message
     Process.unlink(port)
 
-    new_state = handle_proof_completion(state, block_number, status)
+    new_state =
+      case state.zisk_action do
+        :prove -> handle_proof_completion(state, block_number, status)
+        :execute -> handle_execution_completion(state, block_number, status)
+      end
+
     {:noreply, maybe_start_next(new_state)}
   end
 
@@ -139,7 +159,9 @@ defmodule EthProofsClient.Prover do
   defp currently_proving?(_state, _block_number), do: false
 
   defp enqueue(state, block_number, input_path) do
-    Logger.info("Enqueued block #{block_number} for proving (input: #{input_path})")
+    Logger.info(
+      "Enqueued block #{block_number} for #{zisk_action_label(state.zisk_action)} (input: #{input_path})"
+    )
 
     %{
       state
@@ -151,12 +173,15 @@ defmodule EthProofsClient.Prover do
   defp maybe_start_next(%{status: :idle, queue: queue} = state) do
     case :queue.out(queue) do
       {{:value, {block_number, input_path}}, new_queue} ->
-        port = start_prover(state.elf, block_number, input_path)
+        port = start_prover(state.elf, block_number, input_path, state.zisk_action)
         Process.link(port)
-        report_proving(block_number)
+
+        if state.zisk_action == :prove do
+          report_proving(block_number)
+        end
 
         Logger.info(
-          "Started cargo-zisk prover for block #{block_number} (ELF: #{state.elf}, INPUT: #{input_path}, PORT: #{inspect(port)})"
+          "Started cargo-zisk #{zisk_action_label(state.zisk_action)} for block #{block_number} (ELF: #{state.elf}, INPUT: #{input_path}, PORT: #{inspect(port)})"
         )
 
         %{
@@ -176,26 +201,19 @@ defmodule EthProofsClient.Prover do
   # Already proving, do nothing
   defp maybe_start_next(state), do: state
 
-  defp start_prover(elf, block_number, input_path) do
+  defp start_prover(elf, block_number, input_path, zisk_action) do
     output_dir = Path.join(@output_dir, Integer.to_string(block_number))
-    File.mkdir_p!(output_dir)
+
+    if zisk_action == :prove do
+      File.mkdir_p!(output_dir)
+    end
 
     Port.open(
       {:spawn_executable, System.find_executable("cargo-zisk")},
       [
         :binary,
         :exit_status,
-        args: [
-          "prove",
-          "-e",
-          elf,
-          "-i",
-          input_path,
-          "-o",
-          output_dir,
-          "-a",
-          "-u"
-        ]
+        args: zisk_args(zisk_action, elf, input_path, output_dir)
       ]
     )
   end
@@ -213,6 +231,20 @@ defmodule EthProofsClient.Prover do
         Logger.error(
           "Failed to read proof data for block #{block_number} (exit_status: #{exit_status}): #{inspect(reason)}"
         )
+    end
+
+    %{state | status: :idle, proving_since: nil}
+  end
+
+  defp handle_execution_completion(state, block_number, exit_status) do
+    if exit_status == 0 do
+      Logger.info(
+        "Executed block #{block_number} with cargo-zisk #{zisk_action_label(state.zisk_action)}"
+      )
+    else
+      Logger.error(
+        "Execution failed for block #{block_number} with cargo-zisk #{zisk_action_label(state.zisk_action)} (status #{exit_status})"
+      )
     end
 
     %{state | status: :idle, proving_since: nil}
@@ -246,6 +278,36 @@ defmodule EthProofsClient.Prover do
 
   defp proving_duration(%{proving_since: since}) do
     DateTime.diff(DateTime.utc_now(), since, :second)
+  end
+
+  defp resolve_zisk_action do
+    action =
+      Application.get_env(:ethproofs_client, :zisk_action, @default_zisk_action)
+      |> to_string()
+      |> String.downcase()
+
+    case action do
+      "prove" ->
+        :prove
+
+      "execute" ->
+        :execute
+
+      other ->
+        Logger.warning("Unknown ZISK_ACTION=#{inspect(other)}, defaulting to prove.")
+        :prove
+    end
+  end
+
+  defp zisk_action_label(:prove), do: "prove"
+  defp zisk_action_label(:execute), do: "execute"
+
+  defp zisk_args(:prove, elf_path, input_path, output_dir_path) do
+    ["prove", "-e", elf_path, "-i", input_path, "-o", output_dir_path, "-a", "-u"]
+  end
+
+  defp zisk_args(:execute, elf_path, input_path, _output_dir_path) do
+    ["execute", "-e", elf_path, "-i", input_path, "-u"]
   end
 
   # --- API Reporting Functions ---

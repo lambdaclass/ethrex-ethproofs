@@ -114,6 +114,9 @@ defmodule EthProofsClient.InputGenerator do
         processed_blocks: MapSet.put(state.processed_blocks, block_number)
     }
 
+    # Broadcast status update before potentially starting next
+    broadcast_generator_status(new_state)
+
     {:noreply, maybe_start_next(new_state)}
   end
 
@@ -127,6 +130,10 @@ defmodule EthProofsClient.InputGenerator do
 
     # Don't mark as processed so it can be retried if requested again
     new_state = %{state | status: :idle}
+
+    # Broadcast status update
+    broadcast_generator_status(new_state)
+
     {:noreply, maybe_start_next(new_state)}
   end
 
@@ -170,11 +177,15 @@ defmodule EthProofsClient.InputGenerator do
   defp enqueue(state, block_number) do
     Logger.info("Enqueued block #{block_number} for input generation")
 
-    %{
+    new_state = %{
       state
       | queue: :queue.in(block_number, state.queue),
         queued_blocks: MapSet.put(state.queued_blocks, block_number)
     }
+
+    # Broadcast queue update
+    broadcast_generator_status(new_state)
+    new_state
   end
 
   defp maybe_start_next(%{status: :idle, queue: queue} = state) do
@@ -190,12 +201,16 @@ defmodule EthProofsClient.InputGenerator do
             fn -> do_generate_input(block_number) end
           )
 
-        %{
+        new_state = %{
           state
           | status: {:generating, block_number, task.ref},
             queue: new_queue,
             queued_blocks: MapSet.delete(state.queued_blocks, block_number)
         }
+
+        # Broadcast status update
+        broadcast_generator_status(new_state)
+        new_state
 
       {:empty, _queue} ->
         Logger.debug("Generation queue is empty, generator is idle")
@@ -238,6 +253,9 @@ defmodule EthProofsClient.InputGenerator do
 
     # Update state with last block info
     state = %{state | last_block_info: block_info}
+
+    # Broadcast generator status with updated block info
+    broadcast_generator_status(state)
 
     cond do
       rem(block_number, 100) != 0 ->
@@ -282,6 +300,24 @@ defmodule EthProofsClient.InputGenerator do
       EthProofsClient.PubSub,
       "next_block",
       {:next_block, info}
+    )
+  rescue
+    # PubSub might not be started during tests
+    ArgumentError -> :ok
+  end
+
+  defp broadcast_generator_status(state) do
+    status_info = %{
+      status: sanitize_status(state.status),
+      queue_length: :queue.len(state.queue),
+      processed_count: MapSet.size(state.processed_blocks),
+      last_block_info: state.last_block_info
+    }
+
+    Phoenix.PubSub.broadcast(
+      EthProofsClient.PubSub,
+      "generator_status",
+      {:generator_status, status_info}
     )
   rescue
     # PubSub might not be started during tests

@@ -40,7 +40,12 @@ defmodule EthProofsClientWeb.DashboardLive do
 
   @impl true
   def handle_info(:refresh, socket) do
-    {:noreply, assign_status(socket)}
+    socket =
+      socket
+      |> assign_status()
+      |> assign_next_block_info()
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -50,12 +55,25 @@ defmodule EthProofsClientWeb.DashboardLive do
 
   @impl true
   def handle_info({:prover_status, _status}, socket) do
-    {:noreply, assign_status(socket)}
+    # Fetch fresh status since the broadcast only contains partial info
+    prover_status = safe_call(Prover, :status)
+
+    socket =
+      socket
+      |> assign(:prover_status, prover_status)
+
+    {:noreply, socket}
   end
 
   @impl true
-  def handle_info({:generator_status, _status}, socket) do
-    {:noreply, assign_status(socket)}
+  def handle_info({:generator_status, status}, socket) do
+    # Use the broadcasted status directly - it contains all needed info
+    socket =
+      socket
+      |> assign(:generator_status, status)
+      |> assign(:next_block_info, Map.get(status, :last_block_info))
+
+    {:noreply, socket}
   end
 
   @impl true

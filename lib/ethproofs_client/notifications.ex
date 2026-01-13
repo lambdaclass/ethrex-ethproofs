@@ -67,7 +67,7 @@ defmodule EthProofsClient.Notifications do
         |> add_system_fields()
 
       headline = build_headline(message, opts[:status])
-      notify(build_message(headline, fields))
+      notify(%{blocks: build_message_blocks(headline, fields)})
     else
       :ok
     end
@@ -82,7 +82,7 @@ defmodule EthProofsClient.Notifications do
       end
 
     prefix = if is_binary(emoji), do: emoji <> " ", else: ""
-    "### " <> prefix <> message
+    prefix <> message
   end
 
   defp add_block_fields(fields, block_number) do
@@ -129,14 +129,23 @@ defmodule EthProofsClient.Notifications do
     "#{code_value(branch)} (#{code_value(commit)})"
   end
 
-  defp build_message(message, fields) do
-    fields_text =
-      fields
-      |> Enum.map(fn {label, value} -> "*#{label}:* #{value}" end)
-      |> Enum.join("\n")
+  defp build_message_blocks(headline, fields) do
+    blocks = [
+      %{
+        type: "header",
+        text: %{type: "plain_text", text: headline, emoji: true}
+      }
+    ]
 
-    [message, fields_text]
-    |> Enum.reject(&(&1 in [nil, ""]))
+    case build_fields_text(fields) do
+      "" -> blocks
+      text -> blocks ++ [%{type: "section", text: %{type: "mrkdwn", text: text}}]
+    end
+  end
+
+  defp build_fields_text(fields) do
+    fields
+    |> Enum.map(fn {label, value} -> "*#{label}:* #{value}" end)
     |> Enum.join("\n")
   end
 

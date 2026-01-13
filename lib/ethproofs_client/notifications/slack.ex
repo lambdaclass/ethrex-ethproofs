@@ -6,9 +6,12 @@ defmodule EthProofsClient.Notifications.Slack do
 
   plug(Tesla.Middleware.Headers, [{"content-type", "application/json"}])
 
-  def notify(message) when is_binary(message) do
+  def notify(payload) when is_map(payload), do: send_payload(payload)
+  def notify(message) when is_binary(message), do: send_payload(%{text: message})
+
+  defp send_payload(payload) do
     webhook = slack_webhook()
-    body = Jason.encode!(%{text: message})
+    body = Jason.encode!(payload)
 
     case post(webhook, body) do
       {:ok, rsp} ->

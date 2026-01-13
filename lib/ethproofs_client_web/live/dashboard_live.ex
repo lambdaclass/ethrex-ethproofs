@@ -1,145 +1,62 @@
 defmodule EthProofsClientWeb.DashboardLive do
   @moduledoc """
   LiveView dashboard displaying real-time status of the EthProofs Client.
-
-  Subscribes to PubSub topics for:
-  - Prover status updates
-  - InputGenerator status updates
-  - Proved blocks updates
-  - Next block countdown
+  Updates every second by polling the GenServers directly.
   """
 
   use EthProofsClientWeb, :live_view
-  require Logger
 
   alias EthProofsClient.{InputGenerator, Prover, ProvedBlocksStore}
 
-  @refresh_interval 1_000
-
   @impl true
   def mount(_params, _session, socket) do
+    # Only start the timer when the WebSocket is connected
     if connected?(socket) do
-      Logger.debug("DashboardLive: WebSocket connected, subscribing to PubSub topics")
-
-      # Subscribe to PubSub updates
-      Phoenix.PubSub.subscribe(EthProofsClient.PubSub, "proved_blocks")
-      Phoenix.PubSub.subscribe(EthProofsClient.PubSub, "prover_status")
-      Phoenix.PubSub.subscribe(EthProofsClient.PubSub, "generator_status")
-      Phoenix.PubSub.subscribe(EthProofsClient.PubSub, "next_block")
-
-      # Schedule first refresh
-      schedule_refresh()
-    else
-      Logger.debug("DashboardLive: Initial mount (not connected yet)")
+      # Send first tick immediately, then every second
+      send(self(), :tick)
+      :timer.send_interval(1_000, self(), :tick)
     end
 
-    socket =
-      socket
-      |> assign(:page_title, "Dashboard")
-      |> assign_status()
-      |> assign_proved_blocks()
-      |> assign_next_block_info()
-
-    {:ok, socket}
-  end
-
-  defp schedule_refresh do
-    Process.send_after(self(), :refresh, @refresh_interval)
+    {:ok, assign(socket, page_title: "Dashboard", tick: 0) |> fetch_all_data()}
   end
 
   @impl true
-  def handle_info(:refresh, socket) do
-    Logger.debug("DashboardLive: Refresh timer fired")
+  def handle_info(:tick, socket) do
+    # Increment tick counter to force re-render and fetch fresh data
+    {:noreply, socket |> assign(:tick, socket.assigns.tick + 1) |> fetch_all_data()}
+  end
 
-    socket =
-      socket
-      |> assign_status()
-      |> assign_next_block_info()
-
-    # Schedule next refresh
-    schedule_refresh()
-
+  @impl true
+  def handle_info(_msg, socket) do
     {:noreply, socket}
   end
 
-  @impl true
-  def handle_info({:proved_blocks_updated, blocks}, socket) do
-    Logger.debug("DashboardLive: Received proved_blocks_updated with #{length(blocks)} blocks")
-    {:noreply, assign(socket, :proved_blocks, blocks)}
-  end
-
-  @impl true
-  def handle_info({:prover_status, status}, socket) do
-    Logger.debug("DashboardLive: Received prover_status: #{inspect(status)}")
-    # Fetch fresh status since the broadcast only contains partial info
-    prover_status = safe_call(Prover, :status)
-
-    socket =
-      socket
-      |> assign(:prover_status, prover_status)
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_info({:generator_status, status}, socket) do
-    Logger.debug("DashboardLive: Received generator_status: #{inspect(status)}")
-    # Use the broadcasted status directly - it contains all needed info
-    socket =
-      socket
-      |> assign(:generator_status, status)
-      |> assign(:next_block_info, Map.get(status, :last_block_info))
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_info({:next_block, info}, socket) do
-    Logger.debug("DashboardLive: Received next_block: #{inspect(info)}")
-    {:noreply, assign(socket, :next_block_info, info)}
-  end
-
-  @impl true
-  def handle_info(msg, socket) do
-    Logger.debug("DashboardLive: Received unknown message: #{inspect(msg)}")
-    {:noreply, socket}
-  end
-
-  defp assign_status(socket) do
+  # Fetch all data from GenServers
+  defp fetch_all_data(socket) do
     prover_status = safe_call(Prover, :status)
     generator_status = safe_call(InputGenerator, :status)
+    proved_blocks = safe_call(ProvedBlocksStore, :list_blocks) || []
 
-    Logger.debug("DashboardLive: assign_status - generator_status: #{inspect(generator_status)}")
+    # Extract next_block_info from generator_status
+    next_block_info =
+      case generator_status do
+        %{last_block_info: info} when not is_nil(info) -> info
+        _ -> nil
+      end
 
     socket
     |> assign(:prover_status, prover_status)
     |> assign(:generator_status, generator_status)
-  end
-
-  defp assign_proved_blocks(socket) do
-    blocks = safe_call(ProvedBlocksStore, :list_blocks) || []
-    assign(socket, :proved_blocks, blocks)
-  end
-
-  defp assign_next_block_info(socket) do
-    generator_status = socket.assigns[:generator_status] || %{}
-    next_block_info = Map.get(generator_status, :last_block_info)
-    Logger.debug("DashboardLive: assign_next_block_info - next_block_info: #{inspect(next_block_info)}")
-    assign(socket, :next_block_info, next_block_info)
+    |> assign(:proved_blocks, proved_blocks)
+    |> assign(:next_block_info, next_block_info)
   end
 
   defp safe_call(module, function, args \\ []) do
-    result = apply(module, function, args)
-    Logger.debug("DashboardLive: safe_call #{module}.#{function} returned: #{inspect(result)}")
-    result
+    apply(module, function, args)
   rescue
-    e ->
-      Logger.error("DashboardLive: safe_call #{module}.#{function} raised: #{inspect(e)}")
-      nil
+    _ -> nil
   catch
-    :exit, reason ->
-      Logger.error("DashboardLive: safe_call #{module}.#{function} exited: #{inspect(reason)}")
-      nil
+    :exit, _ -> nil
   end
 
   @impl true
@@ -151,28 +68,35 @@ defmodule EthProofsClientWeb.DashboardLive do
         <h2 class="text-3xl font-bold text-white mb-2">Proof Generation Status</h2>
         <p class="text-slate-400 mb-6">Real-time monitoring of Ethereum block proof generation</p>
 
-        <div :if={@next_block_info} class="inline-flex items-center gap-8 bg-slate-800/60 border border-slate-700/50 rounded-xl px-8 py-4">
-          <div class="text-left">
-            <div class="text-sm text-slate-400">Current Block</div>
-            <div class="text-2xl font-bold text-white font-mono">
-              <%= @next_block_info.current_block %>
+        <%= if @next_block_info do %>
+          <div class="inline-flex items-center gap-8 bg-slate-800/60 border border-slate-700/50 rounded-xl px-8 py-4">
+            <div class="text-left">
+              <div class="text-sm text-slate-400">Current Block</div>
+              <div class="text-2xl font-bold text-white font-mono">
+                <%= @next_block_info.current_block %>
+              </div>
+            </div>
+            <div class="w-px h-12 bg-slate-700"></div>
+            <div class="text-left">
+              <div class="text-sm text-slate-400">Next Target Block</div>
+              <div class="text-2xl font-bold text-cyan-400 font-mono">
+                <%= @next_block_info.next_target_block %>
+              </div>
+            </div>
+            <div class="w-px h-12 bg-slate-700"></div>
+            <div class="text-left">
+              <div class="text-sm text-slate-400">Estimated Time</div>
+              <div class="text-2xl font-bold text-white font-mono tabular-nums">
+                <%= format_countdown(@next_block_info.estimated_seconds) %>
+              </div>
             </div>
           </div>
-          <div class="w-px h-12 bg-slate-700"></div>
-          <div class="text-left">
-            <div class="text-sm text-slate-400">Next Target Block</div>
-            <div class="text-2xl font-bold text-cyan-400 font-mono">
-              <%= @next_block_info.next_target_block %>
-            </div>
+        <% else %>
+          <div class="inline-flex items-center gap-4 bg-slate-800/60 border border-slate-700/50 rounded-xl px-8 py-4">
+            <div class="animate-spin h-5 w-5 border-2 border-cyan-400 border-t-transparent rounded-full"></div>
+            <span class="text-slate-400">Connecting to Ethereum node...</span>
           </div>
-          <div class="w-px h-12 bg-slate-700"></div>
-          <div class="text-left">
-            <div class="text-sm text-slate-400">Estimated Time</div>
-            <div class="text-2xl font-bold text-white font-mono tabular-nums">
-              <%= format_countdown(@next_block_info.estimated_seconds) %>
-            </div>
-          </div>
-        </div>
+        <% end %>
       </section>
 
       <%!-- Metrics Row --%>

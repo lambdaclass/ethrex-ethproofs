@@ -131,12 +131,12 @@ defmodule EthProofsClient.InputGenerator do
   # Periodic block fetching
   @impl true
   def handle_info(:fetch_latest_block_number, state) do
-    case EthProofsClient.EthRpc.get_latest_block_number() do
-      {:ok, block_number} ->
-        handle_new_block(block_number, state)
+    case EthProofsClient.EthRpc.get_latest_block_info() do
+      {:ok, {block_number, block_timestamp}} ->
+        handle_new_block(block_number, block_timestamp, state)
 
       {:error, reason} ->
-        Logger.error("Failed to fetch latest block number: #{reason}")
+        Logger.error("Failed to fetch latest block: #{reason}")
     end
 
     schedule_fetch()
@@ -215,11 +215,14 @@ defmodule EthProofsClient.InputGenerator do
     end
   end
 
-  defp handle_new_block(block_number, state) do
+  defp handle_new_block(block_number, block_timestamp, state) do
     cond do
       rem(block_number, 100) != 0 ->
-        next_multiple = block_number + (100 - rem(block_number, 100))
-        estimated_wait = (next_multiple - block_number) * 12
+        blocks_remaining = 100 - rem(block_number, 100)
+        next_multiple = block_number + blocks_remaining
+        # Account for time elapsed since block was produced
+        elapsed = System.system_time(:second) - block_timestamp
+        estimated_wait = max(0, blocks_remaining * 12 - elapsed)
 
         Logger.debug(
           "Latest block: #{block_number}. Next multiple of 100: #{next_multiple} (est. #{estimated_wait}s)"

@@ -25,6 +25,18 @@ defmodule EthProofsClient.EthRpc do
     end
   end
 
+  @doc """
+  Returns `{:ok, {block_number, timestamp}}` for the latest block.
+  The timestamp is in Unix seconds.
+  """
+  def get_latest_block_info do
+    with {:ok, block} <- get_block_by_number("latest") do
+      block_number = String.to_integer(String.replace_prefix(block["number"], "0x", ""), 16)
+      timestamp = String.to_integer(String.replace_prefix(block["timestamp"], "0x", ""), 16)
+      {:ok, {block_number, timestamp}}
+    end
+  end
+
   defp send_request(method, args, opts) do
     payload = build_payload(method, args)
 

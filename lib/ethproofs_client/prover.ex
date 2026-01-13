@@ -221,6 +221,7 @@ defmodule EthProofsClient.Prover do
   defp read_proof_data(block_number) do
     block_dir = Integer.to_string(block_number)
     result_path = Path.join([@output_dir, block_dir, "result.json"])
+
     proof_paths = [
       Path.join([@output_dir, block_dir, "vadcop_final_proof.compressed.bin"]),
       Path.join([@output_dir, block_dir, "vadcop_final_proof.bin"])

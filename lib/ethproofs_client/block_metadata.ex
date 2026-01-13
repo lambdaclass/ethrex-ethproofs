@@ -4,6 +4,11 @@ defmodule EthProofsClient.BlockMetadata do
   # Stores block gas used and transaction count so notifications can include them later.
   @table :ethproofs_block_metadata
 
+  def init_table do
+    ensure_table()
+    :ok
+  end
+
   def put_from_json(block_number, block_json) when is_integer(block_number) do
     with {:ok, %{"gasUsed" => gas_used, "transactions" => transactions}} <-
            Jason.decode(block_json),

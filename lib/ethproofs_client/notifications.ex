@@ -55,14 +55,13 @@ defmodule EthProofsClient.Notifications do
     if enabled?() do
       fields =
         []
-        |> add_field("Block", code_value(block_number))
         |> maybe_add_field("Step", opts[:step] && code_value(opts[:step]))
         |> maybe_add_field("Reason", opts[:reason] && code_value(format_reason(opts[:reason])))
         |> maybe_add_field("Proving time", format_proving_time(opts[:proving_time_ms]))
         |> add_block_fields(block_number)
         |> add_system_fields()
 
-      notify(build_message(message, fields))
+      notify(build_message("### " <> message, fields))
     else
       :ok
     end

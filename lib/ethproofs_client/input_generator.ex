@@ -55,6 +55,7 @@ defmodule EthProofsClient.InputGenerator do
 
   @impl true
   def init(_state) do
+    BlockMetadata.init_table()
     schedule_fetch()
     {:ok, %__MODULE__{status: :idle}}
   end

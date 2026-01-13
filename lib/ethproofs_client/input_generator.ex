@@ -239,13 +239,13 @@ defmodule EthProofsClient.InputGenerator do
     blocks_remaining = 100 - rem(block_number, 100)
     blocks_remaining = if blocks_remaining == 100, do: 0, else: blocks_remaining
     next_multiple = block_number + blocks_remaining
-    elapsed = System.system_time(:second) - block_timestamp
-    estimated_wait = max(0, blocks_remaining * 12 - elapsed)
 
+    # Store timestamp and blocks_remaining so dashboard can recalculate countdown
     block_info = %{
       current_block: block_number,
       next_target_block: next_multiple,
-      estimated_seconds: estimated_wait
+      blocks_remaining: blocks_remaining,
+      block_timestamp: block_timestamp
     }
 
     # Broadcast for live updates
@@ -259,8 +259,11 @@ defmodule EthProofsClient.InputGenerator do
 
     cond do
       rem(block_number, 100) != 0 ->
+        elapsed = System.system_time(:second) - block_timestamp
+        est_wait = max(0, blocks_remaining * 12 - elapsed)
+
         Logger.debug(
-          "Latest block: #{block_number}. Next multiple of 100: #{next_multiple} (est. #{estimated_wait}s)"
+          "Latest block: #{block_number}. Next multiple of 100: #{next_multiple} (est. #{est_wait}s)"
         )
 
         state

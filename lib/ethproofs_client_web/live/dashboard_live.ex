@@ -5,25 +5,45 @@ defmodule EthProofsClientWeb.DashboardLive do
   """
 
   use EthProofsClientWeb, :live_view
+  require Logger
 
   alias EthProofsClient.{InputGenerator, Prover, ProvedBlocksStore}
 
+  @tick_interval 1_000
+
   @impl true
   def mount(_params, _session, socket) do
+    Logger.info("DashboardLive mount - connected?: #{connected?(socket)}")
+
+    socket = assign(socket, page_title: "Dashboard", tick: 0)
+
     # Only start the timer when the WebSocket is connected
     if connected?(socket) do
-      # Send first tick immediately, then every second
-      send(self(), :tick)
-      :timer.send_interval(1_000, self(), :tick)
+      Logger.info("DashboardLive: WebSocket connected, starting timer")
+      # Schedule first tick
+      Process.send_after(self(), :tick, 0)
+    else
+      Logger.info("DashboardLive: Initial render (no WebSocket yet)")
     end
 
-    {:ok, assign(socket, page_title: "Dashboard", tick: 0) |> fetch_all_data()}
+    {:ok, fetch_all_data(socket)}
   end
 
   @impl true
   def handle_info(:tick, socket) do
+    new_tick = socket.assigns.tick + 1
+    Logger.info("DashboardLive tick ##{new_tick}")
+
+    # Schedule next tick
+    Process.send_after(self(), :tick, @tick_interval)
+
     # Increment tick counter to force re-render and fetch fresh data
-    {:noreply, socket |> assign(:tick, socket.assigns.tick + 1) |> fetch_all_data()}
+    socket =
+      socket
+      |> assign(:tick, new_tick)
+      |> fetch_all_data()
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -37,11 +57,15 @@ defmodule EthProofsClientWeb.DashboardLive do
     generator_status = safe_call(InputGenerator, :status)
     proved_blocks = safe_call(ProvedBlocksStore, :list_blocks) || []
 
-    # Extract next_block_info from generator_status
+    # Extract next_block_info from generator_status and recalculate countdown
     next_block_info =
       case generator_status do
-        %{last_block_info: info} when not is_nil(info) -> info
-        _ -> nil
+        %{last_block_info: info} when not is_nil(info) ->
+          # Recalculate estimated_seconds based on current time
+          recalculate_countdown(info)
+
+        _ ->
+          nil
       end
 
     socket
@@ -50,6 +74,15 @@ defmodule EthProofsClientWeb.DashboardLive do
     |> assign(:proved_blocks, proved_blocks)
     |> assign(:next_block_info, next_block_info)
   end
+
+  # Recalculate the countdown based on current time
+  defp recalculate_countdown(%{block_timestamp: timestamp, blocks_remaining: remaining} = info) do
+    elapsed = System.system_time(:second) - timestamp
+    estimated_seconds = max(0, remaining * 12 - elapsed)
+    Map.put(info, :estimated_seconds, estimated_seconds)
+  end
+
+  defp recalculate_countdown(info), do: info
 
   defp safe_call(module, function, args \\ []) do
     apply(module, function, args)
@@ -66,7 +99,10 @@ defmodule EthProofsClientWeb.DashboardLive do
       <%!-- Header with current block info --%>
       <section class="text-center py-8">
         <h2 class="text-3xl font-bold text-white mb-2">Proof Generation Status</h2>
-        <p class="text-slate-400 mb-6">Real-time monitoring of Ethereum block proof generation</p>
+        <p class="text-slate-400 mb-6">
+          Real-time monitoring of Ethereum block proof generation
+          <span class="text-slate-600 text-xs ml-2">(update #<%= @tick %>)</span>
+        </p>
 
         <%= if @next_block_info do %>
           <div class="inline-flex items-center gap-8 bg-slate-800/60 border border-slate-700/50 rounded-xl px-8 py-4">

@@ -224,6 +224,13 @@ defmodule EthProofsClient.InputGenerator do
         elapsed = System.system_time(:second) - block_timestamp
         estimated_wait = max(0, blocks_remaining * 12 - elapsed)
 
+        # Broadcast next block info for dashboard
+        broadcast_next_block(%{
+          current_block: block_number,
+          next_target_block: next_multiple,
+          estimated_seconds: estimated_wait
+        })
+
         Logger.debug(
           "Latest block: #{block_number}. Next multiple of 100: #{next_multiple} (est. #{estimated_wait}s)"
         )
@@ -252,6 +259,17 @@ defmodule EthProofsClient.InputGenerator do
 
   defp sanitize_status(:idle), do: :idle
   defp sanitize_status({:generating, block_number, _ref}), do: {:generating, block_number}
+
+  defp broadcast_next_block(info) do
+    Phoenix.PubSub.broadcast(
+      EthProofsClient.PubSub,
+      "next_block",
+      {:next_block, info}
+    )
+  rescue
+    # PubSub might not be started during tests
+    ArgumentError -> :ok
+  end
 
   # NIF stub - replaced at runtime by Rustler
   defp generate_input(_rpc_block_bytes, _rpc_execution_witness_bytes),

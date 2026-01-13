@@ -6,10 +6,12 @@ defmodule EthProofsClient.Application do
 
   ```
   EthProofsClient.Supervisor (strategy: :rest_for_one)
+  ├── Phoenix.PubSub (for real-time updates)
   ├── EthProofsClient.TaskSupervisor (Task.Supervisor)
+  ├── EthProofsClient.ProvedBlocksStore (GenServer)
   ├── EthProofsClient.Prover (GenServer)
   ├── EthProofsClient.InputGenerator (GenServer)
-  └── Bandit (HTTP server for health endpoints)
+  └── EthProofsClientWeb.Endpoint (Phoenix web server)
   ```
 
   Uses `:rest_for_one` strategy so that if TaskSupervisor crashes,
@@ -19,29 +21,28 @@ defmodule EthProofsClient.Application do
   use Application
   require Logger
 
-  alias EthProofsClient.HealthRouter
   alias EthProofsClient.InputGenerator
+  alias EthProofsClient.ProvedBlocksStore
   alias EthProofsClient.Prover
-
-  @default_health_port 4000
 
   def start(_type, _args) do
     elf_path =
       Application.get_env(:ethproofs_client, :elf_path) ||
         raise "ELF_PATH environment variable must be set"
 
-    health_port = get_health_port()
-
     children = [
-      # TaskSupervisor must start first - InputGenerator depends on it
+      # PubSub for real-time updates
+      {Phoenix.PubSub, name: EthProofsClient.PubSub},
+      # TaskSupervisor must start before InputGenerator depends on it
       {Task.Supervisor, name: EthProofsClient.TaskSupervisor},
+      # ProvedBlocksStore tracks proved blocks
+      ProvedBlocksStore,
+      # Core GenServers
       {Prover, elf_path},
       {InputGenerator, []},
-      # Health endpoint HTTP server
-      {Plug.Cowboy, scheme: :http, plug: HealthRouter, options: [port: health_port]}
+      # Phoenix web endpoint
+      EthProofsClientWeb.Endpoint
     ]
-
-    Logger.info("Starting health endpoint on http://0.0.0.0:#{health_port}/health")
 
     # :rest_for_one ensures that if TaskSupervisor crashes,
     # Prover and InputGenerator are restarted too
@@ -49,10 +50,11 @@ defmodule EthProofsClient.Application do
     Supervisor.start_link(children, opts)
   end
 
-  defp get_health_port do
-    case System.get_env("HEALTH_PORT") do
-      nil -> @default_health_port
-      port_str -> String.to_integer(port_str)
-    end
+  @doc """
+  Returns the configured endpoint URL for the web interface.
+  """
+  def config_change(changed, _new, removed) do
+    EthProofsClientWeb.Endpoint.config_change(changed, removed)
+    :ok
   end
 end

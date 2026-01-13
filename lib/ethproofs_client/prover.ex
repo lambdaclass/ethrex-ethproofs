@@ -159,6 +159,9 @@ defmodule EthProofsClient.Prover do
           "Started cargo-zisk prover for block #{block_number} (ELF: #{state.elf}, INPUT: #{input_path}, PORT: #{inspect(port)})"
         )
 
+        # Broadcast status update
+        broadcast_status_update({:proving, block_number})
+
         %{
           state
           | status: {:proving, block_number, port},
@@ -201,6 +204,8 @@ defmodule EthProofsClient.Prover do
   end
 
   defp handle_proof_completion(state, block_number, exit_status) do
+    proving_duration = proving_duration(state)
+
     case read_proof_data(block_number) do
       {:ok, proof_data} ->
         Logger.info(
@@ -209,11 +214,20 @@ defmodule EthProofsClient.Prover do
 
         report_proved(block_number, proof_data)
 
+        # Store in ProvedBlocksStore for dashboard
+        EthProofsClient.ProvedBlocksStore.add_block(block_number, %{
+          proved_at: DateTime.utc_now(),
+          proving_duration_seconds: proving_duration
+        })
+
       {:error, reason} ->
         Logger.error(
           "Failed to read proof data for block #{block_number} (exit_status: #{exit_status}): #{inspect(reason)}"
         )
     end
+
+    # Broadcast status update
+    broadcast_status_update(:idle)
 
     %{state | status: :idle, proving_since: nil}
   end
@@ -284,5 +298,16 @@ defmodule EthProofsClient.Prover do
       {:error, reason} ->
         Logger.error("Failed to report proved status for block #{block_number}: #{reason}")
     end
+  end
+
+  defp broadcast_status_update(status) do
+    Phoenix.PubSub.broadcast(
+      EthProofsClient.PubSub,
+      "prover_status",
+      {:prover_status, status}
+    )
+  rescue
+    # PubSub might not be started during tests
+    ArgumentError -> :ok
   end
 end

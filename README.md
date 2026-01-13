@@ -272,6 +272,18 @@ A `Task.Supervisor` that supervises async tasks spawned by InputGenerator.
 
 > **Note:** If `ETHPROOFS_*` variables are not set, the client will still generate proofs but won't report them to the EthProofs API.
 
+### Slack Notifications
+
+Slack notifications are sent when `SLACK_WEBHOOK` is set and all `ETHPROOFS_*` variables are present. Notifications cover input generation, proof generation, proof data reads, and EthProofs API requests. Success messages are sent after a proof is submitted.
+
+Each message includes a short headline plus fields:
+- Block number
+- Step and reason (for failures)
+- Proving time (for successes)
+- Gas used and transaction count (from `eth_getBlockByNumber`; `unknown` if the block fetch failed)
+- CPU, GPU, and RAM specs
+- Branch and commit (from `GIT_BRANCH`/`GIT_COMMIT` envs or `git`)
+
 ### Health Endpoint
 
 The application exposes HTTP health endpoints for monitoring and orchestration (e.g., Kubernetes probes).

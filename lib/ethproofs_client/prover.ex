@@ -132,6 +132,13 @@ defmodule EthProofsClient.Prover do
       "Port died unexpectedly for block #{block_number}: #{inspect(reason)}. Continuing with next item."
     )
 
+    if state.zisk_action == :prove do
+      Notifications.proof_generation_failed(
+        block_number,
+        "cargo-zisk port died: #{inspect(reason)}"
+      )
+    end
+
     new_state = %{state | status: :idle, proving_since: nil}
     {:noreply, maybe_start_next(new_state)}
   end
@@ -240,9 +247,6 @@ defmodule EthProofsClient.Prover do
               Notifications.proof_submitted(block_number, proof_data.time)
             end
 
-          {:ok, :skipped} ->
-            :ok
-
           {:error, _reason} ->
             :ok
         end
@@ -280,6 +284,7 @@ defmodule EthProofsClient.Prover do
   defp read_proof_data(block_number) do
     block_dir = Integer.to_string(block_number)
     result_path = Path.join([@output_dir, block_dir, "result.json"])
+
     proof_paths = [
       Path.join([@output_dir, block_dir, "vadcop_final_proof.compressed.bin"]),
       Path.join([@output_dir, block_dir, "vadcop_final_proof.bin"])
@@ -356,9 +361,6 @@ defmodule EthProofsClient.Prover do
       {:ok, _proof_id} ->
         :ok
 
-      {:ok, :skipped} ->
-        :ok
-
       {:error, reason} ->
         Logger.error("Failed to report queued status for block #{block_number}: #{reason}")
         Notifications.ethproofs_request_failed(block_number, "queued", reason)
@@ -368,9 +370,6 @@ defmodule EthProofsClient.Prover do
   defp report_proving(block_number) do
     case EthProofsClient.Rpc.proving_proof(block_number) do
       {:ok, _proof_id} ->
-        :ok
-
-      {:ok, :skipped} ->
         :ok
 
       {:error, reason} ->
@@ -388,9 +387,6 @@ defmodule EthProofsClient.Prover do
            proof_data.verifier_id
          ) do
       {:ok, _proof_id} = ok ->
-        ok
-
-      {:ok, :skipped} = ok ->
         ok
 
       {:error, reason} = error ->

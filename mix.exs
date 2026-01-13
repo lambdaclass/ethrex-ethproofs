@@ -25,9 +25,12 @@ defmodule EthProofsClient.MixProject do
     [
       {:cowboy, "~> 2.9"},
       {:plug, "~> 1.14"},
+      {:plug_cowboy, "~> 2.5"},
       {:jason, "~> 1.4"},
       {:rustler, "~> 0.37.1"},
-      {:tesla, "~> 1.4"}
+      {:tesla, "~> 1.4"},
+      # Dev/Test
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 end

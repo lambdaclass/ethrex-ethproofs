@@ -3,7 +3,13 @@ defmodule EthProofsClient.EthRpc do
 
   use Tesla
 
+  alias EthProofsClient.Notifications
+
   plug(Tesla.Middleware.Headers, [{"content-type", "application/json"}])
+
+  @rpc_down_after_ms 60_000
+  @status_table :ethproofs_eth_rpc_status
+  @status_key :status
 
   def eth_rpc_url do
     Application.get_env(:ethproofs_client, :eth_rpc_url) ||
@@ -27,10 +33,29 @@ defmodule EthProofsClient.EthRpc do
 
   defp send_request(method, args, opts) do
     payload = build_payload(method, args)
+    url = eth_rpc_url()
 
-    {:ok, rsp} = post(eth_rpc_url(), payload)
+    case post(url, payload) do
+      {:ok, rsp} ->
+        case handle_response(rsp, opts) do
+          {:ok, _result} = ok ->
+            record_success(url)
+            ok
 
-    handle_response(rsp, opts)
+          {:error, reason, :responded} ->
+            record_success(url)
+            {:error, reason}
+
+          {:error, reason} ->
+            record_failure(url, reason)
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        error = format_error(reason)
+        record_failure(url, error)
+        {:error, error}
+    end
   end
 
   defp build_payload(method, params) do
@@ -43,18 +68,25 @@ defmodule EthProofsClient.EthRpc do
     |> Jason.encode!()
   end
 
-  defp handle_response(rsp, opts) do
-    case Jason.decode!(rsp.body) do
-      %{"result" => result} ->
-        if opts[:raw] do
-          {:ok, Jason.encode!(result)}
-        else
-          {:ok, result}
-        end
+  defp handle_response(%{status: 200, body: body}, opts) do
+    case Jason.decode(body) do
+      {:ok, %{"result" => result}} ->
+        value = if opts[:raw], do: Jason.encode!(result), else: result
+        {:ok, value}
 
-      %{"error" => error} ->
-        {:error, error}
+      {:ok, %{"error" => error}} ->
+        {:error, format_error(error), :responded}
+
+      {:ok, decoded} ->
+        {:error, "Unexpected JSON-RPC response: #{inspect(decoded)}"}
+
+      {:error, decode_error} ->
+        {:error, "Invalid JSON response: #{inspect(decode_error)}"}
     end
+  end
+
+  defp handle_response(%{status: status, body: body}, _opts) do
+    {:error, "HTTP #{status}: #{body}"}
   end
 
   defp normalize_block_number(block_number) when is_integer(block_number) do
@@ -68,4 +100,79 @@ defmodule EthProofsClient.EthRpc do
       "0x" <> block_number
     end
   end
+
+  defp record_success(url) do
+    status = rpc_status()
+
+    if status.down_since_ms do
+      now = now_ms()
+
+      if status.notified? do
+        Notifications.rpc_recovered(url, status.down_since_ms, now)
+      end
+
+      update_rpc_status(%{down_since_ms: nil, notified?: false, last_error: nil})
+    end
+
+    :ok
+  end
+
+  defp record_failure(url, reason) do
+    now = now_ms()
+    status = rpc_status()
+
+    status =
+      if is_nil(status.down_since_ms) do
+        %{down_since_ms: now, notified?: false, last_error: reason}
+      else
+        %{status | last_error: reason}
+      end
+
+    status =
+      if not status.notified? and now - status.down_since_ms >= @rpc_down_after_ms do
+        Notifications.rpc_down(url, status.down_since_ms, status.last_error)
+        %{status | notified?: true}
+      else
+        status
+      end
+
+    update_rpc_status(status)
+    :ok
+  end
+
+  defp rpc_status do
+    ensure_status_table()
+
+    status =
+      case :ets.lookup(@status_table, @status_key) do
+        [{@status_key, status}] -> status
+        _ -> %{}
+      end
+
+    Map.merge(%{down_since_ms: nil, notified?: false, last_error: nil}, status)
+  end
+
+  defp update_rpc_status(status) do
+    ensure_status_table()
+    :ets.insert(@status_table, {@status_key, status})
+  end
+
+  defp ensure_status_table do
+    case :ets.whereis(@status_table) do
+      :undefined ->
+        :ets.new(@status_table, [:named_table, :public, :set, read_concurrency: true])
+
+      _ ->
+        @status_table
+    end
+  end
+
+  defp now_ms do
+    System.system_time(:millisecond)
+  end
+
+  defp format_error(%{"message" => message}) when is_binary(message), do: message
+  defp format_error(%{message: message}) when is_binary(message), do: message
+  defp format_error(error) when is_binary(error), do: error
+  defp format_error(error), do: inspect(error)
 end

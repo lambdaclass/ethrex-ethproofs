@@ -56,6 +56,33 @@ defmodule EthProofsClient.Notifications do
     )
   end
 
+  def rpc_down(url, down_since_ms, reason) do
+    fields =
+      []
+      |> add_field("RPC URL", code_value(url))
+      |> maybe_add_field("Down since", format_timestamp_ms(down_since_ms))
+      |> maybe_add_field("Down for", format_duration_ms(elapsed_ms(down_since_ms)))
+      |> maybe_add_field("Last error", reason && code_value(format_reason(reason)))
+
+    headline = ":x: ETH RPC down: #{url}"
+    notify(%{blocks: build_message_blocks(headline, fields)})
+  end
+
+  def rpc_recovered(url, down_since_ms, recovered_at_ms) do
+    fields =
+      []
+      |> add_field("RPC URL", code_value(url))
+      |> maybe_add_field("Down since", format_timestamp_ms(down_since_ms))
+      |> maybe_add_field("Recovered at", format_timestamp_ms(recovered_at_ms))
+      |> maybe_add_field(
+        "Downtime",
+        format_duration_ms(duration_ms(down_since_ms, recovered_at_ms))
+      )
+
+    headline = ":white_check_mark: ETH RPC recovered: #{url}"
+    notify(%{blocks: build_message_blocks(headline, fields)})
+  end
+
   defp notify_event(message, block_number, opts) do
     if enabled?() do
       fields =
@@ -123,6 +150,34 @@ defmodule EthProofsClient.Notifications do
 
   defp format_proving_time(_), do: nil
 
+  defp format_timestamp_ms(ms) when is_integer(ms) do
+    ms
+    |> DateTime.from_unix!(:millisecond)
+    |> DateTime.to_iso8601()
+    |> code_value()
+  end
+
+  defp format_timestamp_ms(_), do: nil
+
+  defp format_duration_ms(ms) when is_integer(ms) and ms >= 0 do
+    seconds = div(ms, 1000)
+    minutes = div(seconds, 60)
+    hours = div(minutes, 60)
+    seconds_rem = rem(seconds, 60)
+    minutes_rem = rem(minutes, 60)
+
+    formatted =
+      cond do
+        hours > 0 -> "#{hours}h #{minutes_rem}m"
+        minutes > 0 -> "#{minutes}m #{seconds_rem}s"
+        true -> "#{seconds}s"
+      end
+
+    code_value(formatted)
+  end
+
+  defp format_duration_ms(_), do: nil
+
   defp format_branch_commit(%{branch: branch, commit: commit}) do
     branch = branch || "unknown"
     commit = commit || "unknown"
@@ -183,6 +238,23 @@ defmodule EthProofsClient.Notifications do
 
   defp format_reason(reason) when is_binary(reason), do: reason
   defp format_reason(reason), do: inspect(reason)
+
+  defp elapsed_ms(nil), do: nil
+
+  defp elapsed_ms(down_since_ms) when is_integer(down_since_ms) do
+    duration_ms(down_since_ms, System.system_time(:millisecond))
+  end
+
+  defp elapsed_ms(_), do: nil
+
+  defp duration_ms(nil, _), do: nil
+  defp duration_ms(_, nil), do: nil
+
+  defp duration_ms(start_ms, end_ms) when is_integer(start_ms) and is_integer(end_ms) do
+    max(end_ms - start_ms, 0)
+  end
+
+  defp duration_ms(_, _), do: nil
 
   defp system_info do
     case :persistent_term.get(@system_info_key, nil) do

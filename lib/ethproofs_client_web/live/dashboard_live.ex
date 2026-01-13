@@ -5,7 +5,6 @@ defmodule EthProofsClientWeb.DashboardLive do
   """
 
   use EthProofsClientWeb, :live_view
-  require Logger
 
   alias EthProofsClient.{InputGenerator, Prover, ProvedBlocksStore}
 
@@ -13,37 +12,17 @@ defmodule EthProofsClientWeb.DashboardLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    Logger.info("DashboardLive mount - connected?: #{connected?(socket)}")
-
-    socket = assign(socket, page_title: "Dashboard", tick: 0)
-
-    # Only start the timer when the WebSocket is connected
     if connected?(socket) do
-      Logger.info("DashboardLive: WebSocket connected, starting timer")
-      # Schedule first tick
       Process.send_after(self(), :tick, 0)
-    else
-      Logger.info("DashboardLive: Initial render (no WebSocket yet)")
     end
 
-    {:ok, fetch_all_data(socket)}
+    {:ok, socket |> assign(:page_title, "Dashboard") |> fetch_all_data()}
   end
 
   @impl true
   def handle_info(:tick, socket) do
-    new_tick = socket.assigns.tick + 1
-    Logger.info("DashboardLive tick ##{new_tick}")
-
-    # Schedule next tick
     Process.send_after(self(), :tick, @tick_interval)
-
-    # Increment tick counter to force re-render and fetch fresh data
-    socket =
-      socket
-      |> assign(:tick, new_tick)
-      |> fetch_all_data()
-
-    {:noreply, socket}
+    {:noreply, fetch_all_data(socket)}
   end
 
   @impl true
@@ -99,10 +78,7 @@ defmodule EthProofsClientWeb.DashboardLive do
       <%!-- Header with current block info --%>
       <section class="text-center py-8">
         <h2 class="text-3xl font-bold text-white mb-2">Proof Generation Status</h2>
-        <p class="text-slate-400 mb-6">
-          Real-time monitoring of Ethereum block proof generation
-          <span class="text-slate-600 text-xs ml-2">(update #<%= @tick %>)</span>
-        </p>
+        <p class="text-slate-400 mb-6">Real-time monitoring of Ethereum block proof generation</p>
 
         <%= if @next_block_info do %>
           <div class="inline-flex items-center gap-8 bg-slate-800/60 border border-slate-700/50 rounded-xl px-8 py-4">

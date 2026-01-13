@@ -6,7 +6,6 @@ import {LiveSocket} from "phoenix_live_view"
 import topbar from "../vendor/topbar"
 
 let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
-console.log("LiveView: CSRF token found:", csrfToken ? "yes" : "no")
 
 // LiveView Hooks
 let Hooks = {}
@@ -81,13 +80,10 @@ window.addEventListener("phx:page-loading-start", _info => topbar.show(300))
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 
 // connect if there are any LiveViews on the page
-console.log("LiveView: Attempting to connect...")
 liveSocket.connect()
 
-// Enable debug mode by default in development
-liveSocket.enableDebug()
-
 // expose liveSocket on window for web console debug logs and latency simulation:
+// >> liveSocket.enableDebug()
+// >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session
+// >> liveSocket.disableLatencySim()
 window.liveSocket = liveSocket
-
-console.log("LiveView: Connection initiated, check for phx-connected class on body")

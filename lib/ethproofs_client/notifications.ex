@@ -12,7 +12,8 @@ defmodule EthProofsClient.Notifications do
       "Block #{block_number} input generation failed.",
       block_number,
       step: "input generation",
-      reason: reason
+      reason: reason,
+      status: :failure
     )
   end
 
@@ -21,7 +22,8 @@ defmodule EthProofsClient.Notifications do
       "Block #{block_number} proof generation failed.",
       block_number,
       step: "proof generation",
-      reason: reason
+      reason: reason,
+      status: :failure
     )
   end
 
@@ -30,7 +32,8 @@ defmodule EthProofsClient.Notifications do
       "Block #{block_number} proof data read failed.",
       block_number,
       step: "proof data read",
-      reason: reason
+      reason: reason,
+      status: :failure
     )
   end
 
@@ -39,7 +42,8 @@ defmodule EthProofsClient.Notifications do
       "Block #{block_number} EthProofs #{endpoint} request failed.",
       block_number,
       step: "ethproofs #{endpoint} request",
-      reason: reason
+      reason: reason,
+      status: :failure
     )
   end
 
@@ -47,7 +51,8 @@ defmodule EthProofsClient.Notifications do
     notify_event(
       "Block #{block_number} proved and submitted to EthProofs.",
       block_number,
-      proving_time_ms: proving_time_ms
+      proving_time_ms: proving_time_ms,
+      status: :success
     )
   end
 
@@ -61,10 +66,23 @@ defmodule EthProofsClient.Notifications do
         |> add_block_fields(block_number)
         |> add_system_fields()
 
-      notify(build_message("### " <> message, fields))
+      headline = build_headline(message, opts[:status])
+      notify(build_message(headline, fields))
     else
       :ok
     end
+  end
+
+  defp build_headline(message, status) do
+    emoji =
+      case status do
+        :success -> ":white_check_mark:"
+        :failure -> ":warning:"
+        _ -> nil
+      end
+
+    prefix = if is_binary(emoji), do: emoji <> " ", else: ""
+    "### " <> prefix <> message
   end
 
   defp add_block_fields(fields, block_number) do

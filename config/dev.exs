@@ -24,3 +24,6 @@ config :ethproofs_client, EthProofsClientWeb.Endpoint,
 
 # Enable dev routes for dashboard and mailbox
 config :phoenix, :plug_init_mode, :runtime
+
+# Set log level to debug to see LiveView updates
+config :logger, level: :debug

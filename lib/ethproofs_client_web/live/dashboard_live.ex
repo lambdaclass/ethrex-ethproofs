@@ -10,6 +10,7 @@ defmodule EthProofsClientWeb.DashboardLive do
   """
 
   use EthProofsClientWeb, :live_view
+  require Logger
 
   alias EthProofsClient.{InputGenerator, Prover, ProvedBlocksStore}
 
@@ -18,14 +19,18 @@ defmodule EthProofsClientWeb.DashboardLive do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
+      Logger.debug("DashboardLive: WebSocket connected, subscribing to PubSub topics")
+
       # Subscribe to PubSub updates
       Phoenix.PubSub.subscribe(EthProofsClient.PubSub, "proved_blocks")
       Phoenix.PubSub.subscribe(EthProofsClient.PubSub, "prover_status")
       Phoenix.PubSub.subscribe(EthProofsClient.PubSub, "generator_status")
       Phoenix.PubSub.subscribe(EthProofsClient.PubSub, "next_block")
 
-      # Start periodic refresh
-      :timer.send_interval(@refresh_interval, self(), :refresh)
+      # Schedule first refresh
+      schedule_refresh()
+    else
+      Logger.debug("DashboardLive: Initial mount (not connected yet)")
     end
 
     socket =
@@ -38,23 +43,34 @@ defmodule EthProofsClientWeb.DashboardLive do
     {:ok, socket}
   end
 
+  defp schedule_refresh do
+    Process.send_after(self(), :refresh, @refresh_interval)
+  end
+
   @impl true
   def handle_info(:refresh, socket) do
+    Logger.debug("DashboardLive: Refresh timer fired")
+
     socket =
       socket
       |> assign_status()
       |> assign_next_block_info()
+
+    # Schedule next refresh
+    schedule_refresh()
 
     {:noreply, socket}
   end
 
   @impl true
   def handle_info({:proved_blocks_updated, blocks}, socket) do
+    Logger.debug("DashboardLive: Received proved_blocks_updated with #{length(blocks)} blocks")
     {:noreply, assign(socket, :proved_blocks, blocks)}
   end
 
   @impl true
-  def handle_info({:prover_status, _status}, socket) do
+  def handle_info({:prover_status, status}, socket) do
+    Logger.debug("DashboardLive: Received prover_status: #{inspect(status)}")
     # Fetch fresh status since the broadcast only contains partial info
     prover_status = safe_call(Prover, :status)
 
@@ -67,6 +83,7 @@ defmodule EthProofsClientWeb.DashboardLive do
 
   @impl true
   def handle_info({:generator_status, status}, socket) do
+    Logger.debug("DashboardLive: Received generator_status: #{inspect(status)}")
     # Use the broadcasted status directly - it contains all needed info
     socket =
       socket
@@ -78,17 +95,21 @@ defmodule EthProofsClientWeb.DashboardLive do
 
   @impl true
   def handle_info({:next_block, info}, socket) do
+    Logger.debug("DashboardLive: Received next_block: #{inspect(info)}")
     {:noreply, assign(socket, :next_block_info, info)}
   end
 
   @impl true
-  def handle_info(_msg, socket) do
+  def handle_info(msg, socket) do
+    Logger.debug("DashboardLive: Received unknown message: #{inspect(msg)}")
     {:noreply, socket}
   end
 
   defp assign_status(socket) do
     prover_status = safe_call(Prover, :status)
     generator_status = safe_call(InputGenerator, :status)
+
+    Logger.debug("DashboardLive: assign_status - generator_status: #{inspect(generator_status)}")
 
     socket
     |> assign(:prover_status, prover_status)
@@ -102,15 +123,23 @@ defmodule EthProofsClientWeb.DashboardLive do
 
   defp assign_next_block_info(socket) do
     generator_status = socket.assigns[:generator_status] || %{}
-    assign(socket, :next_block_info, Map.get(generator_status, :last_block_info))
+    next_block_info = Map.get(generator_status, :last_block_info)
+    Logger.debug("DashboardLive: assign_next_block_info - next_block_info: #{inspect(next_block_info)}")
+    assign(socket, :next_block_info, next_block_info)
   end
 
   defp safe_call(module, function, args \\ []) do
-    apply(module, function, args)
+    result = apply(module, function, args)
+    Logger.debug("DashboardLive: safe_call #{module}.#{function} returned: #{inspect(result)}")
+    result
   rescue
-    _ -> nil
+    e ->
+      Logger.error("DashboardLive: safe_call #{module}.#{function} raised: #{inspect(e)}")
+      nil
   catch
-    :exit, _ -> nil
+    :exit, reason ->
+      Logger.error("DashboardLive: safe_call #{module}.#{function} exited: #{inspect(reason)}")
+      nil
   end
 
   @impl true

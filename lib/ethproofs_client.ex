@@ -30,6 +30,12 @@ defmodule EthProofsClient.Application do
       Application.get_env(:ethproofs_client, :elf_path) ||
         raise "ELF_PATH environment variable must be set"
 
+    dev_mode = Application.get_env(:ethproofs_client, :dev, false) == true
+
+    if not dev_mode do
+      ensure_ethproofs_env!()
+    end
+
     health_port = get_health_port()
 
     children = [
@@ -53,6 +59,21 @@ defmodule EthProofsClient.Application do
     case System.get_env("HEALTH_PORT") do
       nil -> @default_health_port
       port_str -> String.to_integer(port_str)
+    end
+  end
+
+  defp ensure_ethproofs_env! do
+    missing =
+      [
+        {"ETHPROOFS_RPC_URL", Application.get_env(:ethproofs_client, :ethproofs_rpc_url)},
+        {"ETHPROOFS_API_KEY", Application.get_env(:ethproofs_client, :ethproofs_api_key)},
+        {"ETHPROOFS_CLUSTER_ID", Application.get_env(:ethproofs_client, :ethproofs_cluster_id)}
+      ]
+      |> Enum.filter(fn {_, value} -> is_nil(value) or value == "" end)
+      |> Enum.map(&elem(&1, 0))
+
+    if missing != [] do
+      raise "Missing required env var(s): #{Enum.join(missing, ", ")}. Set DEV=true to disable EthProofs API calls."
     end
   end
 end

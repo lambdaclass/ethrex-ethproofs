@@ -50,9 +50,8 @@ defmodule EthProofsClient.Rpc do
   end
 
   defp send_request(endpoint, body, persist_body \\ false) do
-    if missing_env?() do
-      Logger.warning("Missing ETHPROOFS_* env, skipping RPC call to #{endpoint}")
-
+    if dev_mode?() do
+      Logger.info("DEV mode enabled; skipping EthProofs API call to #{endpoint}")
       {:ok, :skipped}
     else
       body = Map.put(body, :cluster_id, String.to_integer(ethproofs_cluster_id()))
@@ -89,11 +88,9 @@ defmodule EthProofsClient.Rpc do
     end
   end
 
-  defp missing_env? do
-    blank?(ethproofs_api_key()) or blank?(ethproofs_cluster_id()) or blank?(ethproofs_rpc_url())
+  defp dev_mode? do
+    Application.get_env(:ethproofs_client, :dev, false) == true
   end
-
-  defp blank?(value), do: is_nil(value) or value == ""
 
   defp handle_response(rsp) do
     if rsp.status == 200 do

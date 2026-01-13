@@ -31,9 +31,9 @@ defmodule EthProofsClientWeb.DashboardLive do
     socket =
       socket
       |> assign(:page_title, "Dashboard")
-      |> assign(:next_block_info, nil)
       |> assign_status()
       |> assign_proved_blocks()
+      |> assign_next_block_info()
 
     {:ok, socket}
   end
@@ -82,6 +82,11 @@ defmodule EthProofsClientWeb.DashboardLive do
     assign(socket, :proved_blocks, blocks)
   end
 
+  defp assign_next_block_info(socket) do
+    generator_status = socket.assigns[:generator_status] || %{}
+    assign(socket, :next_block_info, Map.get(generator_status, :last_block_info))
+  end
+
   defp safe_call(module, function, args \\ []) do
     apply(module, function, args)
   rescue
@@ -96,7 +101,8 @@ defmodule EthProofsClientWeb.DashboardLive do
     <div class="space-y-8">
       <%!-- Header with current block info --%>
       <section class="text-center py-8">
-        <h2 class="text-3xl font-bold text-white mb-4">Proof Generation Status</h2>
+        <h2 class="text-3xl font-bold text-white mb-2">Proof Generation Status</h2>
+        <p class="text-slate-400 mb-6">Real-time monitoring of Ethereum block proof generation</p>
 
         <div :if={@next_block_info} class="inline-flex items-center gap-8 bg-slate-800/60 border border-slate-700/50 rounded-xl px-8 py-4">
           <div class="text-left">
@@ -119,10 +125,6 @@ defmodule EthProofsClientWeb.DashboardLive do
               <%= format_countdown(@next_block_info.estimated_seconds) %>
             </div>
           </div>
-        </div>
-
-        <div :if={!@next_block_info} class="text-slate-500">
-          Waiting for block data...
         </div>
       </section>
 

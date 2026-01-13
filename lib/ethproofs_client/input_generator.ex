@@ -24,6 +24,7 @@ defmodule EthProofsClient.InputGenerator do
 
   defstruct [
     :status,
+    :last_block_info,
     queue: :queue.new(),
     queued_blocks: MapSet.new(),
     processed_blocks: MapSet.new()
@@ -63,7 +64,8 @@ defmodule EthProofsClient.InputGenerator do
       status: sanitize_status(state.status),
       queue_length: :queue.len(state.queue),
       queued_blocks: MapSet.to_list(state.queued_blocks),
-      processed_count: MapSet.size(state.processed_blocks)
+      processed_count: MapSet.size(state.processed_blocks),
+      last_block_info: state.last_block_info
     }
 
     {:reply, status_info, state}
@@ -131,16 +133,18 @@ defmodule EthProofsClient.InputGenerator do
   # Periodic block fetching
   @impl true
   def handle_info(:fetch_latest_block_number, state) do
-    case EthProofsClient.EthRpc.get_latest_block_info() do
-      {:ok, {block_number, block_timestamp}} ->
-        handle_new_block(block_number, block_timestamp, state)
+    new_state =
+      case EthProofsClient.EthRpc.get_latest_block_info() do
+        {:ok, {block_number, block_timestamp}} ->
+          handle_new_block(block_number, block_timestamp, state)
 
-      {:error, reason} ->
-        Logger.error("Failed to fetch latest block: #{inspect(reason)}")
-    end
+        {:error, reason} ->
+          Logger.error("Failed to fetch latest block: #{inspect(reason)}")
+          state
+      end
 
     schedule_fetch()
-    {:noreply, state}
+    {:noreply, new_state}
   end
 
   # Ignore messages from unknown/old task refs
@@ -216,40 +220,53 @@ defmodule EthProofsClient.InputGenerator do
   end
 
   defp handle_new_block(block_number, block_timestamp, state) do
+    # Always compute and store block info for the dashboard
+    blocks_remaining = 100 - rem(block_number, 100)
+    blocks_remaining = if blocks_remaining == 100, do: 0, else: blocks_remaining
+    next_multiple = block_number + blocks_remaining
+    elapsed = System.system_time(:second) - block_timestamp
+    estimated_wait = max(0, blocks_remaining * 12 - elapsed)
+
+    block_info = %{
+      current_block: block_number,
+      next_target_block: next_multiple,
+      estimated_seconds: estimated_wait
+    }
+
+    # Broadcast for live updates
+    broadcast_next_block(block_info)
+
+    # Update state with last block info
+    state = %{state | last_block_info: block_info}
+
     cond do
       rem(block_number, 100) != 0 ->
-        blocks_remaining = 100 - rem(block_number, 100)
-        next_multiple = block_number + blocks_remaining
-        # Account for time elapsed since block was produced
-        elapsed = System.system_time(:second) - block_timestamp
-        estimated_wait = max(0, blocks_remaining * 12 - elapsed)
-
-        # Broadcast next block info for dashboard
-        broadcast_next_block(%{
-          current_block: block_number,
-          next_target_block: next_multiple,
-          estimated_seconds: estimated_wait
-        })
-
         Logger.debug(
           "Latest block: #{block_number}. Next multiple of 100: #{next_multiple} (est. #{estimated_wait}s)"
         )
 
+        state
+
       MapSet.member?(state.processed_blocks, block_number) ->
         Logger.debug("Block #{block_number} already processed, skipping")
+        state
 
       MapSet.member?(state.queued_blocks, block_number) ->
         Logger.debug("Block #{block_number} already queued, skipping")
+        state
 
       currently_generating?(state, block_number) ->
         Logger.debug("Block #{block_number} already generating, skipping")
+        state
 
       File.exists?(Integer.to_string(block_number) <> ".bin") ->
         Logger.debug("Block #{block_number} input file exists, skipping")
+        state
 
       true ->
         Logger.info("Block #{block_number} is a multiple of 100, queueing for generation")
         GenServer.cast(__MODULE__, {:generate, block_number})
+        state
     end
   end
 

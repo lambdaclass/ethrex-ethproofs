@@ -136,7 +136,7 @@ defmodule EthProofsClient.InputGenerator do
         handle_new_block(block_number, block_timestamp, state)
 
       {:error, reason} ->
-        Logger.error("Failed to fetch latest block: #{reason}")
+        Logger.error("Failed to fetch latest block: #{inspect(reason)}")
     end
 
     schedule_fetch()

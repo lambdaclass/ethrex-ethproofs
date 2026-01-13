@@ -73,6 +73,12 @@ defmodule EthProofsClient.EthRpc do
     "0x" <> Integer.to_string(block_number, 16)
   end
 
+  # Special block tags like "latest", "pending", "earliest", "safe", "finalized"
+  defp normalize_block_number(block_number)
+       when block_number in ~w(latest pending earliest safe finalized) do
+    block_number
+  end
+
   defp normalize_block_number(block_number) when is_binary(block_number) do
     if String.starts_with?(block_number, "0x") do
       block_number

@@ -180,6 +180,13 @@ defmodule EthProofsClient.InputGenerator do
     {:noreply, state}
   end
 
+  # Catch-all for any unexpected messages
+  @impl true
+  def handle_info(msg, state) do
+    Logger.warning("InputGenerator received unexpected message: #{inspect(msg)}")
+    {:noreply, state}
+  end
+
   # --- Private Functions ---
 
   defp currently_generating?(%{status: {:generating, block_number, _ref}}, block_number), do: true

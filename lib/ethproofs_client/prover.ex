@@ -147,6 +147,13 @@ defmodule EthProofsClient.Prover do
     {:noreply, state}
   end
 
+  # Catch-all for any unexpected messages
+  @impl true
+  def handle_info(msg, state) do
+    Logger.warning("Prover received unexpected message: #{inspect(msg)}")
+    {:noreply, state}
+  end
+
   # --- Private Functions ---
 
   defp currently_proving?(%{status: {:proving, block_number, _port}}, block_number), do: true

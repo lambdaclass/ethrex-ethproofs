@@ -108,7 +108,9 @@ defmodule EthProofsClient.Prover do
       ) do
     action = if dev_mode?(), do: :execute, else: :prove
 
-    Logger.info("cargo-zisk #{action} exited with status #{exit_status} for block #{block_number}")
+    Logger.info(
+      "cargo-zisk #{action} exited with status #{exit_status} for block #{block_number}"
+    )
 
     # Unlink immediately to prevent receiving duplicate EXIT message
     Process.unlink(port)
@@ -165,9 +167,7 @@ defmodule EthProofsClient.Prover do
   defp enqueue(state, block_number, input_path) do
     action = if dev_mode?(), do: :execute, else: :prove
 
-    Logger.info(
-      "Enqueued block #{block_number} for #{action} (input: #{input_path})"
-    )
+    Logger.info("Enqueued block #{block_number} for #{action} (input: #{input_path})")
 
     %{
       state
@@ -255,9 +255,7 @@ defmodule EthProofsClient.Prover do
 
   defp handle_execution_completion(state, block_number, exit_status) do
     if exit_status == 0 do
-      Logger.info(
-        "Executed block #{block_number} with cargo-zisk execute"
-      )
+      Logger.info("Executed block #{block_number} with cargo-zisk execute")
     else
       Logger.error(
         "Execution failed for block #{block_number} with cargo-zisk execute (status #{exit_status})"

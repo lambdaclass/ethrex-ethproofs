@@ -122,9 +122,11 @@ iex -S mix
 > - Replace `<RPC_URL>` with your Ethereum Mainnet node HTTP JSON-RPC URL.
 > - Remove the `LOG_LEVEL=debug` part if you don't want debug logs (they're useful and not too verbose though).
 > - Make sure the `ELF_PATH` points to the correct guest program ELF file. You can either generate the ELF file yourself from the [ethrex repository](https://github.com/lambdaclass/ethrex) by running `cargo c -r -p ethrex-prover -F zisk` from the root and getting the file generated in `crates/l2/prover/src/guest_program/src/zisk/target/riscv64ima-zisk-zkvm-elf/release/zkvm-zisk-program`, or download it from the [releases page](https://github.com/lambdaclass/ethrex/releases).
+> - To do a quick non-proving run, set `DEV=true`. This uses `cargo-zisk execute` under the hood and disables EthProofs API reporting, which is useful for testing when proving hardware (e.g. a high-end GPU) is unavailable.
+> - When `DEV=true`, you can omit the `ETHPROOFS_*` variables.
 
 > [!TIP]
-> If you want to run the EthProofs client without sending requests to the EthProofs API (for testing purposes), you do this by not passing the `ETHPROOFS_` environment variables.
+> If you want to run the EthProofs client without sending requests to the EthProofs API (for testing purposes), set `DEV=true`.
 
 #### Troubleshooting
 
@@ -260,14 +262,15 @@ A `Task.Supervisor` that supervises async tasks spawned by InputGenerator.
 |---------------------|----------|-------------|
 | `ETH_RPC_URL` | Yes | Ethereum JSON-RPC endpoint URL |
 | `ELF_PATH` | Yes | Path to the ZisK guest program ELF binary |
-| `ETHPROOFS_RPC_URL` | No | EthProofs API base URL |
-| `ETHPROOFS_API_KEY` | No | EthProofs API authentication token |
-| `ETHPROOFS_CLUSTER_ID` | No | EthProofs cluster identifier |
+| `ETHPROOFS_RPC_URL` | No | EthProofs API base URL (required unless `DEV=true`) |
+| `ETHPROOFS_API_KEY` | No | EthProofs API authentication token (required unless `DEV=true`) |
+| `ETHPROOFS_CLUSTER_ID` | No | EthProofs cluster identifier (required unless `DEV=true`) |
+| `DEV` | No | When `true`, disables EthProofs API calls and uses `cargo-zisk execute` |
 | `LOG_LEVEL` | No | Logging level (`debug`, `info`, `warning`, `error`) |
 | `HEALTH_PORT` | No | Port for health HTTP endpoint (default: 4000) |
 | `PROVER_STUCK_THRESHOLD_SECONDS` | No | Seconds before prover is considered stuck (default: 3600). Increase for multi-GPU setups. |
 
-> **Note:** If `ETHPROOFS_*` variables are not set, the client will still generate proofs but won't report them to the EthProofs API.
+> **Note:** When `DEV=true`, the client executes without reporting to the EthProofs API. When `DEV=false`, `ETHPROOFS_*` variables are required.
 
 ### Health Endpoint
 

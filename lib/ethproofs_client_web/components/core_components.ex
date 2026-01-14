@@ -47,6 +47,32 @@ defmodule EthProofsClientWeb.CoreComponents do
   defp status_text(status), do: to_string(status)
 
   @doc """
+  Renders a stage badge indicating which pipeline stage failed.
+  """
+  attr(:stage, :atom, required: true)
+  attr(:class, :string, default: nil)
+
+  def stage_badge(assigns) do
+    ~H"""
+    <span class={[
+      "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium",
+      stage_badge_class(@stage),
+      @class
+    ]}>
+      {stage_text(@stage)}
+    </span>
+    """
+  end
+
+  defp stage_badge_class(:input_generation), do: "bg-cyan-900/50 text-cyan-300"
+  defp stage_badge_class(:proving), do: "bg-amber-900/50 text-amber-300"
+  defp stage_badge_class(_), do: "bg-slate-700/50 text-slate-300"
+
+  defp stage_text(:input_generation), do: "Input Generation"
+  defp stage_text(:proving), do: "Proving"
+  defp stage_text(stage), do: to_string(stage)
+
+  @doc """
   Renders a metric card with a label and value.
   """
   attr(:label, :string, required: true)

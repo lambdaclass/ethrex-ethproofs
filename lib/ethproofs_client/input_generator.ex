@@ -18,6 +18,7 @@ defmodule EthProofsClient.InputGenerator do
   use GenServer
   require Logger
 
+  alias EthProofsClient.MissedBlocksStore
   alias EthProofsClient.Prover
 
   @block_fetch_interval 2_000
@@ -106,6 +107,11 @@ defmodule EthProofsClient.InputGenerator do
 
       {:error, reason} ->
         Logger.error("Failed to generate input for block #{block_number}: #{inspect(reason)}")
+
+        MissedBlocksStore.add_block(block_number, %{
+          stage: :input_generation,
+          reason: format_error(reason)
+        })
     end
 
     new_state = %{
@@ -127,6 +133,11 @@ defmodule EthProofsClient.InputGenerator do
         %{status: {:generating, block_number, ref}} = state
       ) do
     Logger.error("Generation task crashed for block #{block_number}: #{inspect(reason)}")
+
+    MissedBlocksStore.add_block(block_number, %{
+      stage: :input_generation,
+      reason: "Task crashed: #{format_error(reason)}"
+    })
 
     # Don't mark as processed so it can be retried if requested again
     new_state = %{state | status: :idle}
@@ -297,6 +308,10 @@ defmodule EthProofsClient.InputGenerator do
 
   defp sanitize_status(:idle), do: :idle
   defp sanitize_status({:generating, block_number, _ref}), do: {:generating, block_number}
+
+  defp format_error(:timeout), do: "Request timeout"
+  defp format_error(reason) when is_binary(reason), do: reason
+  defp format_error(reason), do: inspect(reason)
 
   defp broadcast_next_block(info) do
     Phoenix.PubSub.broadcast(

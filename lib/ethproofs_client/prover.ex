@@ -12,6 +12,8 @@ defmodule EthProofsClient.Prover do
   use GenServer
   require Logger
 
+  alias EthProofsClient.MissedBlocksStore
+
   @output_dir "output"
 
   defstruct [
@@ -109,6 +111,11 @@ defmodule EthProofsClient.Prover do
     Logger.warning(
       "Port died unexpectedly for block #{block_number}: #{inspect(reason)}. Continuing with next item."
     )
+
+    MissedBlocksStore.add_block(block_number, %{
+      stage: :proving,
+      reason: "Prover crashed: #{format_error(reason)}"
+    })
 
     new_state = %{state | status: :idle, proving_since: nil}
     {:noreply, maybe_start_next(new_state)}
@@ -224,6 +231,11 @@ defmodule EthProofsClient.Prover do
         Logger.error(
           "Failed to read proof data for block #{block_number} (exit_status: #{exit_status}): #{inspect(reason)}"
         )
+
+        MissedBlocksStore.add_block(block_number, %{
+          stage: :proving,
+          reason: "Proving failed (exit_status: #{exit_status}): #{format_error(reason)}"
+        })
     end
 
     # Broadcast status update
@@ -255,6 +267,9 @@ defmodule EthProofsClient.Prover do
 
   defp sanitize_status(:idle), do: :idle
   defp sanitize_status({:proving, block_number, _port}), do: {:proving, block_number}
+
+  defp format_error(reason) when is_binary(reason), do: reason
+  defp format_error(reason), do: inspect(reason)
 
   defp proving_duration(%{proving_since: nil}), do: nil
 

@@ -9,6 +9,7 @@ defmodule EthProofsClient.Application do
   ├── Phoenix.PubSub (for real-time updates)
   ├── EthProofsClient.TaskSupervisor (Task.Supervisor)
   ├── EthProofsClient.ProvedBlocksStore (GenServer)
+  ├── EthProofsClient.MissedBlocksStore (GenServer)
   ├── EthProofsClient.Prover (GenServer)
   ├── EthProofsClient.InputGenerator (GenServer)
   └── EthProofsClientWeb.Endpoint (Phoenix web server)
@@ -22,6 +23,7 @@ defmodule EthProofsClient.Application do
   require Logger
 
   alias EthProofsClient.InputGenerator
+  alias EthProofsClient.MissedBlocksStore
   alias EthProofsClient.ProvedBlocksStore
   alias EthProofsClient.Prover
 
@@ -37,6 +39,8 @@ defmodule EthProofsClient.Application do
       {Task.Supervisor, name: EthProofsClient.TaskSupervisor},
       # ProvedBlocksStore tracks proved blocks
       ProvedBlocksStore,
+      # MissedBlocksStore tracks failed blocks
+      MissedBlocksStore,
       # Core GenServers
       {Prover, elf_path},
       {InputGenerator, []},

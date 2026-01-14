@@ -6,7 +6,7 @@ defmodule EthProofsClientWeb.DashboardLive do
 
   use EthProofsClientWeb, :live_view
 
-  alias EthProofsClient.{InputGenerator, Prover, ProvedBlocksStore}
+  alias EthProofsClient.{InputGenerator, MissedBlocksStore, Prover, ProvedBlocksStore}
 
   @tick_interval 1_000
 
@@ -35,6 +35,7 @@ defmodule EthProofsClientWeb.DashboardLive do
     prover_status = safe_call(Prover, :status)
     generator_status = safe_call(InputGenerator, :status)
     proved_blocks = safe_call(ProvedBlocksStore, :list_blocks) || []
+    missed_blocks = safe_call(MissedBlocksStore, :list_blocks) || []
 
     # Extract next_block_info from generator_status and recalculate countdown
     next_block_info =
@@ -51,6 +52,7 @@ defmodule EthProofsClientWeb.DashboardLive do
     |> assign(:prover_status, prover_status)
     |> assign(:generator_status, generator_status)
     |> assign(:proved_blocks, proved_blocks)
+    |> assign(:missed_blocks, missed_blocks)
     |> assign(:next_block_info, next_block_info)
   end
 
@@ -112,11 +114,19 @@ defmodule EthProofsClientWeb.DashboardLive do
       </section>
 
       <%!-- Metrics Row --%>
-      <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <section class="grid grid-cols-2 md:grid-cols-5 gap-4">
         <.metric_card label="Blocks Proved" value={length(@proved_blocks)}>
           <:icon>
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </:icon>
+        </.metric_card>
+
+        <.metric_card label="Blocks Missed" value={length(@missed_blocks)}>
+          <:icon>
+            <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </:icon>
         </.metric_card>
@@ -180,6 +190,29 @@ defmodule EthProofsClientWeb.DashboardLive do
           </:col>
         </.blocks_table>
       </section>
+
+      <%!-- Missed Blocks Table --%>
+      <%= if @missed_blocks != [] do %>
+        <section class="bg-red-900/20 border border-red-700/50 rounded-xl overflow-hidden">
+          <div class="px-6 py-4 border-b border-red-700/50">
+            <h3 class="text-lg font-semibold text-red-300">Missed Blocks</h3>
+          </div>
+          <.blocks_table id="missed-blocks" rows={@missed_blocks}>
+            <:col :let={block} label="Block" class="text-white">
+              <.etherscan_link block_number={block.block_number} />
+            </:col>
+            <:col :let={block} label="Failed At" class="text-slate-300">
+              {format_datetime(block.failed_at)}
+            </:col>
+            <:col :let={block} label="Stage" class="text-slate-300">
+              <.stage_badge stage={block.stage} />
+            </:col>
+            <:col :let={block} label="Reason" class="text-red-300">
+              {block.reason}
+            </:col>
+          </.blocks_table>
+        </section>
+      <% end %>
     </div>
     """
   end

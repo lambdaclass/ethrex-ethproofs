@@ -223,8 +223,6 @@ defmodule EthProofsClient.Prover do
   end
 
   defp start_prover(elf, block_number, input_path, :execute) do
-    output_dir = Path.join(@output_dir, Integer.to_string(block_number))
-
     Port.open(
       {:spawn_executable, System.find_executable("cargo-zisk")},
       [

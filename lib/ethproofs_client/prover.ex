@@ -12,6 +12,8 @@ defmodule EthProofsClient.Prover do
   use GenServer
   require Logger
 
+  alias EthProofsClient.MissedBlocksStore
+
   @output_dir "output"
 
   defstruct [
@@ -110,6 +112,11 @@ defmodule EthProofsClient.Prover do
       "Port died unexpectedly for block #{block_number}: #{inspect(reason)}. Continuing with next item."
     )
 
+    MissedBlocksStore.add_block(block_number, %{
+      stage: :proving,
+      reason: "Prover crashed: #{format_error(reason)}"
+    })
+
     new_state = %{state | status: :idle, proving_since: nil}
     {:noreply, maybe_start_next(new_state)}
   end
@@ -130,6 +137,20 @@ defmodule EthProofsClient.Prover do
   @impl true
   def handle_info({:EXIT, port, _reason}, state) when is_port(port) do
     Logger.debug("Ignoring EXIT from unknown port: #{inspect(port)}")
+    {:noreply, state}
+  end
+
+  # Handle EXIT from PIDs (processes spawned by the port or linked processes)
+  @impl true
+  def handle_info({:EXIT, pid, reason}, state) when is_pid(pid) do
+    Logger.debug("Ignoring EXIT from process #{inspect(pid)}: #{inspect(reason)}")
+    {:noreply, state}
+  end
+
+  # Catch-all for any unexpected messages
+  @impl true
+  def handle_info(msg, state) do
+    Logger.warning("Prover received unexpected message: #{inspect(msg)}")
     {:noreply, state}
   end
 
@@ -158,6 +179,9 @@ defmodule EthProofsClient.Prover do
         Logger.info(
           "Started cargo-zisk prover for block #{block_number} (ELF: #{state.elf}, INPUT: #{input_path}, PORT: #{inspect(port)})"
         )
+
+        # Broadcast status update
+        broadcast_status_update({:proving, block_number})
 
         %{
           state
@@ -201,6 +225,8 @@ defmodule EthProofsClient.Prover do
   end
 
   defp handle_proof_completion(state, block_number, exit_status) do
+    proving_duration = proving_duration(state)
+
     case read_proof_data(block_number) do
       {:ok, proof_data} ->
         Logger.info(
@@ -209,11 +235,25 @@ defmodule EthProofsClient.Prover do
 
         report_proved(block_number, proof_data)
 
+        # Store in ProvedBlocksStore for dashboard
+        EthProofsClient.ProvedBlocksStore.add_block(block_number, %{
+          proved_at: DateTime.utc_now(),
+          proving_duration_seconds: proving_duration
+        })
+
       {:error, reason} ->
         Logger.error(
           "Failed to read proof data for block #{block_number} (exit_status: #{exit_status}): #{inspect(reason)}"
         )
+
+        MissedBlocksStore.add_block(block_number, %{
+          stage: :proving,
+          reason: "Proving failed (exit_status: #{exit_status}): #{format_error(reason)}"
+        })
     end
+
+    # Broadcast status update
+    broadcast_status_update(:idle)
 
     %{state | status: :idle, proving_since: nil}
   end
@@ -241,6 +281,9 @@ defmodule EthProofsClient.Prover do
 
   defp sanitize_status(:idle), do: :idle
   defp sanitize_status({:proving, block_number, _port}), do: {:proving, block_number}
+
+  defp format_error(reason) when is_binary(reason), do: reason
+  defp format_error(reason), do: inspect(reason)
 
   defp proving_duration(%{proving_since: nil}), do: nil
 
@@ -284,5 +327,16 @@ defmodule EthProofsClient.Prover do
       {:error, reason} ->
         Logger.error("Failed to report proved status for block #{block_number}: #{reason}")
     end
+  end
+
+  defp broadcast_status_update(status) do
+    Phoenix.PubSub.broadcast(
+      EthProofsClient.PubSub,
+      "prover_status",
+      {:prover_status, status}
+    )
+  rescue
+    # PubSub might not be started during tests
+    ArgumentError -> :ok
   end
 end

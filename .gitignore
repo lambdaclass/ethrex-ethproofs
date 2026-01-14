@@ -33,3 +33,9 @@ priv/native
 
 # Generated inputs
 *.bin
+
+# Phoenix static assets (compiled from /assets/)
+/priv/static/assets/
+
+# Ignore output directory for proofs
+/output/

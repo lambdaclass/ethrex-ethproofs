@@ -3,6 +3,9 @@ defmodule EthProofsClient.EthRpc do
 
   use Tesla
 
+  @request_timeout 30_000
+
+  plug(Tesla.Middleware.Timeout, timeout: @request_timeout)
   plug(Tesla.Middleware.Headers, [{"content-type", "application/json"}])
 
   def eth_rpc_url do
@@ -40,9 +43,16 @@ defmodule EthProofsClient.EthRpc do
   defp send_request(method, args, opts) do
     payload = build_payload(method, args)
 
-    {:ok, rsp} = post(eth_rpc_url(), payload)
+    case post(eth_rpc_url(), payload) do
+      {:ok, rsp} ->
+        handle_response(rsp, opts)
 
-    handle_response(rsp, opts)
+      {:error, :timeout} ->
+        {:error, :timeout}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   defp build_payload(method, params) do

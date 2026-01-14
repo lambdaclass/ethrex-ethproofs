@@ -199,19 +199,29 @@ defmodule EthProofsClient.Prover do
   # Already proving, do nothing
   defp maybe_start_next(state), do: state
 
-  defp start_prover(elf, block_number, input_path, zisk_action) do
+  defp start_prover(elf, block_number, input_path, :prove) do
     output_dir = Path.join(@output_dir, Integer.to_string(block_number))
-
-    if zisk_action == :prove do
-      File.mkdir_p!(output_dir)
-    end
+    File.mkdir_p!(output_dir)
 
     Port.open(
       {:spawn_executable, System.find_executable("cargo-zisk")},
       [
         :binary,
         :exit_status,
-        args: zisk_args(zisk_action, elf, input_path, output_dir)
+        args: zisk_args(:prove, elf, input_path, output_dir)
+      ]
+    )
+  end
+
+  defp start_prover(elf, block_number, input_path, :execute) do
+    output_dir = Path.join(@output_dir, Integer.to_string(block_number))
+
+    Port.open(
+      {:spawn_executable, System.find_executable("cargo-zisk")},
+      [
+        :binary,
+        :exit_status,
+        args: zisk_args(:execute, elf, input_path, output_dir)
       ]
     )
   end

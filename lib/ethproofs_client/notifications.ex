@@ -65,7 +65,6 @@ defmodule EthProofsClient.Notifications do
           []
           |> add_field("RPC URL", code_value(url))
           |> maybe_add_field("Down since", format_timestamp_ms(down_since_ms))
-          |> maybe_add_field("Down for", format_duration_ms(elapsed_ms(down_since_ms)))
           |> maybe_add_field("Last error", reason && code_value(format_reason(reason)))
 
         headline = ":x: ETH RPC down: #{url}"
@@ -168,11 +167,21 @@ defmodule EthProofsClient.Notifications do
   defp format_timestamp_ms(ms) when is_integer(ms) do
     ms
     |> DateTime.from_unix!(:millisecond)
-    |> DateTime.to_iso8601()
+    |> format_gmt_minus_3()
     |> code_value()
   end
 
   defp format_timestamp_ms(_), do: nil
+
+  defp format_gmt_minus_3(%DateTime{} = datetime) do
+    offset_seconds = -3 * 60 * 60
+    local = DateTime.add(datetime, offset_seconds, :second)
+    naive = DateTime.to_naive(local)
+    {microseconds, _precision} = naive.microsecond
+    millis = div(microseconds, 1000)
+    naive = %{naive | microsecond: {millis * 1000, 3}}
+    NaiveDateTime.to_iso8601(naive) <> "-03:00"
+  end
 
   defp format_duration_ms(ms) when is_integer(ms) and ms >= 0 do
     seconds = div(ms, 1000)

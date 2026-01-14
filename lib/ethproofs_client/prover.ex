@@ -140,6 +140,13 @@ defmodule EthProofsClient.Prover do
     {:noreply, state}
   end
 
+  # Handle EXIT from PIDs (processes spawned by the port or linked processes)
+  @impl true
+  def handle_info({:EXIT, pid, reason}, state) when is_pid(pid) do
+    Logger.debug("Ignoring EXIT from process #{inspect(pid)}: #{inspect(reason)}")
+    {:noreply, state}
+  end
+
   # --- Private Functions ---
 
   defp currently_proving?(%{status: {:proving, block_number, _port}}, block_number), do: true

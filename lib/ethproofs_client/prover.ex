@@ -20,6 +20,7 @@ defmodule EthProofsClient.Prover do
     :status,
     :elf,
     :proving_since,
+    :current_input_gen_duration,
     queue: :queue.new(),
     queued_blocks: MapSet.new()
   ]
@@ -32,9 +33,12 @@ defmodule EthProofsClient.Prover do
 
   @doc """
   Enqueue a block for proving. Duplicates are automatically ignored.
+
+  The optional `input_gen_duration` parameter tracks how long input generation took,
+  so it can be displayed in the dashboard.
   """
-  def prove(block_number, input_path) do
-    GenServer.cast(__MODULE__, {:prove, block_number, input_path})
+  def prove(block_number, input_path, input_gen_duration \\ nil) do
+    GenServer.cast(__MODULE__, {:prove, block_number, input_path, input_gen_duration})
   end
 
   @doc """
@@ -66,7 +70,7 @@ defmodule EthProofsClient.Prover do
   end
 
   @impl true
-  def handle_cast({:prove, block_number, input_path}, state) do
+  def handle_cast({:prove, block_number, input_path, input_gen_duration}, state) do
     cond do
       MapSet.member?(state.queued_blocks, block_number) ->
         Logger.debug("Block #{block_number} already queued, skipping")
@@ -78,7 +82,7 @@ defmodule EthProofsClient.Prover do
 
       true ->
         report_queued(block_number)
-        new_state = enqueue(state, block_number, input_path)
+        new_state = enqueue(state, block_number, input_path, input_gen_duration)
         {:noreply, maybe_start_next(new_state)}
     end
   end
@@ -159,19 +163,19 @@ defmodule EthProofsClient.Prover do
   defp currently_proving?(%{status: {:proving, block_number, _port}}, block_number), do: true
   defp currently_proving?(_state, _block_number), do: false
 
-  defp enqueue(state, block_number, input_path) do
+  defp enqueue(state, block_number, input_path, input_gen_duration) do
     Logger.info("Enqueued block #{block_number} for proving (input: #{input_path})")
 
     %{
       state
-      | queue: :queue.in({block_number, input_path}, state.queue),
+      | queue: :queue.in({block_number, input_path, input_gen_duration}, state.queue),
         queued_blocks: MapSet.put(state.queued_blocks, block_number)
     }
   end
 
   defp maybe_start_next(%{status: :idle, queue: queue} = state) do
     case :queue.out(queue) do
-      {{:value, {block_number, input_path}}, new_queue} ->
+      {{:value, {block_number, input_path, input_gen_duration}}, new_queue} ->
         port = start_prover(state.elf, block_number, input_path)
         Process.link(port)
         report_proving(block_number)
@@ -188,7 +192,8 @@ defmodule EthProofsClient.Prover do
           | status: {:proving, block_number, port},
             queue: new_queue,
             queued_blocks: MapSet.delete(state.queued_blocks, block_number),
-            proving_since: DateTime.utc_now()
+            proving_since: DateTime.utc_now(),
+            current_input_gen_duration: input_gen_duration
         }
 
       {:empty, _queue} ->
@@ -226,6 +231,7 @@ defmodule EthProofsClient.Prover do
 
   defp handle_proof_completion(state, block_number, exit_status) do
     proving_duration = proving_duration(state)
+    input_gen_duration = state.current_input_gen_duration
 
     case read_proof_data(block_number) do
       {:ok, proof_data} ->
@@ -238,7 +244,8 @@ defmodule EthProofsClient.Prover do
         # Store in ProvedBlocksStore for dashboard
         EthProofsClient.ProvedBlocksStore.add_block(block_number, %{
           proved_at: DateTime.utc_now(),
-          proving_duration_seconds: proving_duration
+          proving_duration_seconds: proving_duration,
+          input_generation_duration_seconds: input_gen_duration
         })
 
       {:error, reason} ->
@@ -255,7 +262,7 @@ defmodule EthProofsClient.Prover do
     # Broadcast status update
     broadcast_status_update(:idle)
 
-    %{state | status: :idle, proving_since: nil}
+    %{state | status: :idle, proving_since: nil, current_input_gen_duration: nil}
   end
 
   defp read_proof_data(block_number) do

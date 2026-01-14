@@ -8,6 +8,7 @@ defmodule EthProofsClient.Rpc do
   @request_timeout 30_000
 
   plug(Tesla.Middleware.Timeout, timeout: @request_timeout)
+
   plug(Tesla.Middleware.Headers, [
     {"content-type", "application/json"},
     {"authorization", "Bearer " <> ethproofs_api_key()}

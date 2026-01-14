@@ -26,6 +26,7 @@ defmodule EthProofsClient.InputGenerator do
   defstruct [
     :status,
     :last_block_info,
+    :generating_since,
     queue: :queue.new(),
     queued_blocks: MapSet.new(),
     processed_blocks: MapSet.new()
@@ -100,10 +101,16 @@ defmodule EthProofsClient.InputGenerator do
     # Flush the :DOWN message since we handled completion
     Process.demonitor(ref, [:flush])
 
+    # Calculate generation duration
+    generation_duration = generation_duration(state)
+
     case result do
       {:ok, input_path} ->
-        Logger.info("Generated input for block #{block_number}: #{input_path}")
-        Prover.prove(block_number, input_path)
+        Logger.info(
+          "Generated input for block #{block_number} in #{generation_duration}s: #{input_path}"
+        )
+
+        Prover.prove(block_number, input_path, generation_duration)
 
       {:error, reason} ->
         Logger.error("Failed to generate input for block #{block_number}: #{inspect(reason)}")
@@ -117,6 +124,7 @@ defmodule EthProofsClient.InputGenerator do
     new_state = %{
       state
       | status: :idle,
+        generating_since: nil,
         processed_blocks: MapSet.put(state.processed_blocks, block_number)
     }
 
@@ -140,7 +148,7 @@ defmodule EthProofsClient.InputGenerator do
     })
 
     # Don't mark as processed so it can be retried if requested again
-    new_state = %{state | status: :idle}
+    new_state = %{state | status: :idle, generating_since: nil}
 
     # Broadcast status update
     broadcast_generator_status(new_state)
@@ -223,7 +231,8 @@ defmodule EthProofsClient.InputGenerator do
           state
           | status: {:generating, block_number, task.ref},
             queue: new_queue,
-            queued_blocks: MapSet.delete(state.queued_blocks, block_number)
+            queued_blocks: MapSet.delete(state.queued_blocks, block_number),
+            generating_since: DateTime.utc_now()
         }
 
         # Broadcast status update
@@ -319,6 +328,12 @@ defmodule EthProofsClient.InputGenerator do
   defp format_error(:timeout), do: "Request timeout"
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(reason), do: inspect(reason)
+
+  defp generation_duration(%{generating_since: nil}), do: nil
+
+  defp generation_duration(%{generating_since: since}) do
+    DateTime.diff(DateTime.utc_now(), since, :second)
+  end
 
   defp broadcast_next_block(info) do
     Phoenix.PubSub.broadcast(

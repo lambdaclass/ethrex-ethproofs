@@ -208,7 +208,7 @@ defmodule EthProofsClient.Prover do
       [
         :binary,
         :exit_status,
-        args: zisk_args(:prove, elf, input_path, output_dir)
+        args: ["prove", "-e", elf, "-i", input_path, "-o", output_dir, "-a", "-u"]
       ]
     )
   end
@@ -221,7 +221,7 @@ defmodule EthProofsClient.Prover do
       [
         :binary,
         :exit_status,
-        args: zisk_args(:execute, elf, input_path, output_dir)
+        args: ["execute", "-e", elf, "-i", input_path, "-u"]
       ]
     )
   end
@@ -298,14 +298,6 @@ defmodule EthProofsClient.Prover do
 
   defp zisk_action_label(:prove), do: "prove"
   defp zisk_action_label(:execute), do: "execute"
-
-  defp zisk_args(:prove, elf_path, input_path, output_dir_path) do
-    ["prove", "-e", elf_path, "-i", input_path, "-o", output_dir_path, "-a", "-u"]
-  end
-
-  defp zisk_args(:execute, elf_path, input_path, _output_dir_path) do
-    ["execute", "-e", elf_path, "-i", input_path, "-u"]
-  end
 
   # --- API Reporting Functions ---
 

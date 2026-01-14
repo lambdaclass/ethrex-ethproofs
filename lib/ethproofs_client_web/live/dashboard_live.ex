@@ -147,7 +147,7 @@ defmodule EthProofsClientWeb.DashboardLive do
           </:icon>
         </.metric_card>
 
-        <.metric_card label="Proving Time" value={format_proving_time(@prover_status)}>
+        <.metric_card label="Avg Proving Time" value={format_avg_proving_time(@proved_blocks)}>
           <:icon>
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -270,10 +270,19 @@ defmodule EthProofsClientWeb.DashboardLive do
     }
   end
 
-  defp format_proving_time(nil), do: "-"
-  defp format_proving_time(%{proving_duration_seconds: nil}), do: "-"
-  defp format_proving_time(%{proving_duration_seconds: secs}), do: format_duration_long(secs)
-  defp format_proving_time(_), do: "-"
+  defp format_avg_proving_time([]), do: "-"
+
+  defp format_avg_proving_time(proved_blocks) do
+    durations =
+      proved_blocks
+      |> Enum.map(& &1.proving_duration_seconds)
+      |> Enum.filter(&is_integer/1)
+
+    case durations do
+      [] -> "-"
+      list -> format_duration_long(div(Enum.sum(list), length(list)))
+    end
+  end
 
   defp format_datetime(nil), do: "-"
 

@@ -52,7 +52,7 @@ defmodule EthProofsClient.Prover do
     Process.flag(:trap_exit, true)
     zisk_action = resolve_zisk_action()
 
-    if dev_mode?() do
+    if EthProofsClient.Application.dev_mode?() do
       Logger.info(
         "DEV mode enabled; using cargo-zisk execute and skipping EthProofs API reporting."
       )
@@ -324,11 +324,7 @@ defmodule EthProofsClient.Prover do
   end
 
   defp resolve_zisk_action do
-    if dev_mode?(), do: :execute, else: :prove
-  end
-
-  defp dev_mode? do
-    Application.get_env(:ethproofs_client, :dev, false) == true
+    if EthProofsClient.Application.dev_mode?(), do: :execute, else: :prove
   end
 
   defp zisk_action_label(:prove), do: "prove"

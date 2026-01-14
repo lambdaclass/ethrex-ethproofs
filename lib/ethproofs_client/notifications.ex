@@ -228,7 +228,7 @@ defmodule EthProofsClient.Notifications do
     |> Enum.join("\n")
   end
 
-  defp notify(payload, context \\ nil)
+  defp notify(payload, context)
 
   defp notify(build_fun, context) when is_function(build_fun, 0) do
     case notification_status() do
@@ -361,14 +361,6 @@ defmodule EthProofsClient.Notifications do
 
   defp format_reason(reason) when is_binary(reason), do: reason
   defp format_reason(reason), do: inspect(reason)
-
-  defp elapsed_ms(nil), do: nil
-
-  defp elapsed_ms(down_since_ms) when is_integer(down_since_ms) do
-    duration_ms(down_since_ms, System.system_time(:millisecond))
-  end
-
-  defp elapsed_ms(_), do: nil
 
   defp duration_ms(nil, _), do: nil
   defp duration_ms(_, nil), do: nil

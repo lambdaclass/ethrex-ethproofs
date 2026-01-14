@@ -31,6 +31,18 @@ defmodule EthProofsClient.EthRpc do
     end
   end
 
+  @doc """
+  Returns `{:ok, {block_number, timestamp}}` for the latest block.
+  The timestamp is in Unix seconds.
+  """
+  def get_latest_block_info do
+    with {:ok, block} <- get_block_by_number("latest") do
+      block_number = String.to_integer(String.replace_prefix(block["number"], "0x", ""), 16)
+      timestamp = String.to_integer(String.replace_prefix(block["timestamp"], "0x", ""), 16)
+      {:ok, {block_number, timestamp}}
+    end
+  end
+
   defp send_request(method, args, opts) do
     payload = build_payload(method, args)
     url = eth_rpc_url()
@@ -91,6 +103,12 @@ defmodule EthProofsClient.EthRpc do
 
   defp normalize_block_number(block_number) when is_integer(block_number) do
     "0x" <> Integer.to_string(block_number, 16)
+  end
+
+  # Special block tags like "latest", "pending", "earliest", "safe", "finalized"
+  defp normalize_block_number(block_number)
+       when block_number in ~w(latest pending earliest safe finalized) do
+    block_number
   end
 
   defp normalize_block_number(block_number) when is_binary(block_number) do

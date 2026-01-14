@@ -15,7 +15,6 @@ defmodule EthProofsClient.Prover do
   alias EthProofsClient.Notifications
 
   @output_dir "output"
-  @default_zisk_action "prove"
 
   defstruct [
     :status,
@@ -53,9 +52,9 @@ defmodule EthProofsClient.Prover do
     Process.flag(:trap_exit, true)
     zisk_action = resolve_zisk_action()
 
-    if zisk_action != :prove do
+    if dev_mode?() do
       Logger.info(
-        "ZisK action set to #{zisk_action_label(zisk_action)}; proof reporting is disabled."
+        "DEV mode enabled; using cargo-zisk execute and skipping EthProofs API reporting."
       )
     end
 
@@ -325,22 +324,11 @@ defmodule EthProofsClient.Prover do
   end
 
   defp resolve_zisk_action do
-    action =
-      Application.get_env(:ethproofs_client, :zisk_action, @default_zisk_action)
-      |> to_string()
-      |> String.downcase()
+    if dev_mode?(), do: :execute, else: :prove
+  end
 
-    case action do
-      "prove" ->
-        :prove
-
-      "execute" ->
-        :execute
-
-      other ->
-        Logger.warning("Unknown ZISK_ACTION=#{inspect(other)}, defaulting to prove.")
-        :prove
-    end
+  defp dev_mode? do
+    Application.get_env(:ethproofs_client, :dev, false) == true
   end
 
   defp zisk_action_label(:prove), do: "prove"

@@ -1,6 +1,8 @@
 defmodule EthProofsClient.Notifications do
   @moduledoc false
 
+  require Logger
+
   alias EthProofsClient.BlockMetadata
   alias EthProofsClient.Notifications.Slack
   alias EthProofsClient.Rpc
@@ -57,47 +59,60 @@ defmodule EthProofsClient.Notifications do
   end
 
   def rpc_down(url, down_since_ms, reason) do
-    fields =
-      []
-      |> add_field("RPC URL", code_value(url))
-      |> maybe_add_field("Down since", format_timestamp_ms(down_since_ms))
-      |> maybe_add_field("Down for", format_duration_ms(elapsed_ms(down_since_ms)))
-      |> maybe_add_field("Last error", reason && code_value(format_reason(reason)))
+    notify(
+      fn ->
+        fields =
+          []
+          |> add_field("RPC URL", code_value(url))
+          |> maybe_add_field("Down since", format_timestamp_ms(down_since_ms))
+          |> maybe_add_field("Down for", format_duration_ms(elapsed_ms(down_since_ms)))
+          |> maybe_add_field("Last error", reason && code_value(format_reason(reason)))
 
-    headline = ":x: ETH RPC down: #{url}"
-    notify(%{blocks: build_message_blocks(headline, fields)})
+        headline = ":x: ETH RPC down: #{url}"
+        %{blocks: build_message_blocks(headline, fields)}
+      end,
+      "rpc_down url=#{url}"
+    )
   end
 
   def rpc_recovered(url, down_since_ms, recovered_at_ms) do
-    fields =
-      []
-      |> add_field("RPC URL", code_value(url))
-      |> maybe_add_field("Down since", format_timestamp_ms(down_since_ms))
-      |> maybe_add_field("Recovered at", format_timestamp_ms(recovered_at_ms))
-      |> maybe_add_field(
-        "Downtime",
-        format_duration_ms(duration_ms(down_since_ms, recovered_at_ms))
-      )
+    notify(
+      fn ->
+        fields =
+          []
+          |> add_field("RPC URL", code_value(url))
+          |> maybe_add_field("Down since", format_timestamp_ms(down_since_ms))
+          |> maybe_add_field("Recovered at", format_timestamp_ms(recovered_at_ms))
+          |> maybe_add_field(
+            "Downtime",
+            format_duration_ms(duration_ms(down_since_ms, recovered_at_ms))
+          )
 
-    headline = ":white_check_mark: ETH RPC recovered: #{url}"
-    notify(%{blocks: build_message_blocks(headline, fields)})
+        headline = ":white_check_mark: ETH RPC recovered: #{url}"
+        %{blocks: build_message_blocks(headline, fields)}
+      end,
+      "rpc_recovered url=#{url}"
+    )
   end
 
   defp notify_event(message, block_number, opts) do
-    if enabled?() do
-      fields =
-        []
-        |> maybe_add_field("Step", opts[:step] && code_value(opts[:step]))
-        |> maybe_add_field("Reason", opts[:reason] && code_value(format_reason(opts[:reason])))
-        |> maybe_add_field("Proving time", format_proving_time(opts[:proving_time_ms]))
-        |> add_block_fields(block_number)
-        |> add_system_fields()
+    context = notification_context(block_number, opts)
 
-      headline = build_headline(message, opts[:status])
-      notify(%{blocks: build_message_blocks(headline, fields)})
-    else
-      :ok
-    end
+    notify(
+      fn ->
+        fields =
+          []
+          |> maybe_add_field("Step", opts[:step] && code_value(opts[:step]))
+          |> maybe_add_field("Reason", opts[:reason] && code_value(format_reason(opts[:reason])))
+          |> maybe_add_field("Proving time", format_proving_time(opts[:proving_time_ms]))
+          |> add_block_fields(block_number)
+          |> add_system_fields()
+
+        headline = build_headline(message, opts[:status])
+        %{blocks: build_message_blocks(headline, fields)}
+      end,
+      context
+    )
   end
 
   defp build_headline(message, status) do
@@ -204,13 +219,112 @@ defmodule EthProofsClient.Notifications do
     |> Enum.join("\n")
   end
 
-  defp notify(message) do
-    if enabled?() do
-      Task.start(fn -> Slack.notify(message) end)
+  defp notify(payload, context \\ nil)
+
+  defp notify(build_fun, context) when is_function(build_fun, 0) do
+    case notification_status() do
+      :enabled ->
+        payload = build_fun.()
+        summary = notification_summary(payload)
+        Logger.debug("Queueing Slack notification#{format_context(context)}: #{summary}")
+
+        case Task.start(fn -> Slack.notify(payload) end) do
+          {:ok, _pid} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.error(
+              "Failed to start Slack notification task#{format_context(context)}: #{inspect(reason)}"
+            )
+        end
+
+      {:disabled, reason} ->
+        Logger.debug("Skipping Slack notification#{format_context(context)}: #{reason}")
     end
 
     :ok
   end
+
+  defp notify(payload, context) do
+    notify(fn -> payload end, context)
+  end
+
+  defp notification_context(block_number, opts) do
+    status = opts[:status] && "status=#{opts[:status]}"
+    step = opts[:step] && "step=#{opts[:step]}"
+
+    ["block #{block_number}", status, step]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(", ")
+  end
+
+  defp notification_summary(payload) when is_binary(payload) do
+    truncate(payload, 200)
+  end
+
+  defp notification_summary(payload) do
+    case extract_header_text(payload) do
+      nil -> inspect(payload, limit: 6, printable_limit: 200)
+      text -> truncate(text, 200)
+    end
+  end
+
+  defp extract_header_text(%{blocks: blocks}) when is_list(blocks) do
+    Enum.find_value(blocks, fn
+      %{type: "header", text: %{text: text}} when is_binary(text) -> text
+      _ -> nil
+    end)
+  end
+
+  defp extract_header_text(_payload), do: nil
+
+  defp truncate(text, limit) when is_binary(text) and is_integer(limit) do
+    if String.length(text) > limit do
+      String.slice(text, 0, limit) <> "..."
+    else
+      text
+    end
+  end
+
+  defp format_context(nil), do: ""
+  defp format_context(""), do: ""
+  defp format_context(context), do: " (" <> context <> ")"
+
+  defp notification_status do
+    if enabled?() do
+      :enabled
+    else
+      {:disabled, disabled_reason()}
+    end
+  end
+
+  defp disabled_reason do
+    reasons = []
+    reasons = if slack_enabled?(), do: reasons, else: reasons ++ ["slack_webhook missing"]
+
+    reasons =
+      case missing_config_keys() do
+        [] -> reasons
+        missing -> reasons ++ ["ethproofs config missing: #{Enum.join(missing, ", ")}"]
+      end
+
+    case reasons do
+      [] -> "notifications disabled"
+      _ -> Enum.join(reasons, "; ")
+    end
+  end
+
+  defp missing_config_keys do
+    []
+    |> maybe_add_missing("ethproofs_api_key", Rpc.ethproofs_api_key())
+    |> maybe_add_missing("ethproofs_cluster_id", Rpc.ethproofs_cluster_id())
+    |> maybe_add_missing("ethproofs_rpc_url", Rpc.ethproofs_rpc_url())
+  end
+
+  defp maybe_add_missing(keys, _label, value) when not is_nil(value) and value != "",
+    do: keys
+
+  defp maybe_add_missing(keys, label, _value), do: keys ++ [label]
 
   defp enabled? do
     slack_enabled?() and ethproofs_configured?()

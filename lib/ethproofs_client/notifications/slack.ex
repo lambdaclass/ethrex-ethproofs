@@ -11,15 +11,23 @@ defmodule EthProofsClient.Notifications.Slack do
 
   defp send_payload(payload) do
     webhook = slack_webhook()
-    body = Jason.encode!(payload)
 
-    case post(webhook, body) do
-      {:ok, rsp} ->
-        handle_response(rsp)
+    if is_nil(webhook) or webhook == "" do
+      Logger.error("Slack webhook missing; dropping notification")
+      {:error, :missing_webhook}
+    else
+      summary = payload_summary(payload)
+      Logger.debug("Posting Slack notification: #{summary}")
+      body = Jason.encode!(payload)
 
-      {:error, reason} ->
-        Logger.error("Slack notification failed: #{inspect(reason)}")
-        {:error, reason}
+      case post(webhook, body) do
+        {:ok, rsp} ->
+          handle_response(rsp)
+
+        {:error, reason} ->
+          Logger.error("Slack notification failed: #{inspect(reason)}")
+          {:error, reason}
+      end
     end
   end
 
@@ -27,10 +35,34 @@ defmodule EthProofsClient.Notifications.Slack do
     Application.get_env(:ethproofs_client, :slack_webhook)
   end
 
-  defp handle_response(%{status: 200}), do: :ok
+  defp handle_response(%{status: 200}) do
+    Logger.debug("Slack notification delivered")
+    :ok
+  end
 
   defp handle_response(%{status: status, body: body}) do
     Logger.error("Slack webhook error: HTTP #{status}: #{body}")
     {:error, :http_error}
+  end
+
+  defp payload_summary(%{text: text}) when is_binary(text) do
+    truncate(text, 200)
+  end
+
+  defp payload_summary(%{blocks: blocks}) when is_list(blocks) do
+    Enum.find_value(blocks, "blocks", fn
+      %{type: "header", text: %{text: text}} when is_binary(text) -> truncate(text, 200)
+      _ -> nil
+    end)
+  end
+
+  defp payload_summary(_payload), do: "payload"
+
+  defp truncate(text, limit) when is_binary(text) and is_integer(limit) do
+    if String.length(text) > limit do
+      String.slice(text, 0, limit) <> "..."
+    else
+      text
+    end
   end
 end

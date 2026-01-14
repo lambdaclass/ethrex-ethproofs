@@ -5,6 +5,9 @@ defmodule EthProofsClient.EthRpc do
 
   alias EthProofsClient.Notifications
 
+  @request_timeout 30_000
+
+  plug(Tesla.Middleware.Timeout, timeout: @request_timeout)
   plug(Tesla.Middleware.Headers, [{"content-type", "application/json"}])
 
   @rpc_down_after_ms 60_000
@@ -62,6 +65,10 @@ defmodule EthProofsClient.EthRpc do
             record_failure(url, reason)
             {:error, reason}
         end
+
+      {:error, :timeout} ->
+        record_failure(url, :timeout)
+        {:error, :timeout}
 
       {:error, reason} ->
         error = format_error(reason)

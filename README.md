@@ -102,17 +102,35 @@ asdf reshim
 
 #### 3. Run the EthProofs client application
 
-In a terminal, run the following from the root of the project:
+First, set up the project:
 
 ```bash
-LOG_LEVEL=debug \
-ETHPROOFS_API_KEY=<ETHPROOFS_API_KEY> \
-ETHPROOFS_RPC_URL=<ETHPROOFS_RPC_URL> \
-ETHPROOFS_CLUSTER_ID=<ETHPROOFS_CLUSTER_ID> \
-ETH_RPC_URL=<ETH_RPC_URL> \
-ELF_PATH=<ELF_PATH> \
-iex -S mix
+make setup
 ```
+
+Then, run the application:
+
+```bash
+# Set required environment variables
+export ETH_RPC_URL=<ETH_RPC_URL>
+export ELF_PATH=<ELF_PATH>
+
+# Optional: EthProofs API integration
+export ETHPROOFS_API_KEY=<ETHPROOFS_API_KEY>
+export ETHPROOFS_RPC_URL=<ETHPROOFS_RPC_URL>
+export ETHPROOFS_CLUSTER_ID=<ETHPROOFS_CLUSTER_ID>
+
+# Optional: Enable debug logging
+export LOG_LEVEL=debug
+
+# Start the application with IEx shell
+make dev
+
+# Or start just the server (no IEx shell)
+make server
+```
+
+The web dashboard will be available at **http://localhost:4000**.
 
 > [!NOTE]
 >
@@ -137,13 +155,16 @@ iex -S mix
 
 ### Architecture Overview
 
-The EthProofs client is built as an OTP application with a supervision tree that manages two main GenServer processes:
+The EthProofs client is built as an OTP application with a supervision tree that manages the core GenServers and a Phoenix LiveView web dashboard:
 
 ```
 EthProofsClient.Supervisor (strategy: :rest_for_one)
+├── Phoenix.PubSub (real-time updates)
 ├── EthProofsClient.TaskSupervisor (Task.Supervisor)
+├── EthProofsClient.ProvedBlocksStore (GenServer - tracks proved blocks)
 ├── EthProofsClient.Prover (GenServer)
-└── EthProofsClient.InputGenerator (GenServer)
+├── EthProofsClient.InputGenerator (GenServer)
+└── EthProofsClientWeb.Endpoint (Phoenix web server)
 ```
 
 #### Data Flow
@@ -256,6 +277,34 @@ A `Task.Supervisor` that supervises async tasks spawned by InputGenerator.
   - `proving_proof/1` - Report proof as in progress
   - `proved_proof/5` - Submit completed proof
 
+### Makefile Commands
+
+The project includes a Makefile for common tasks:
+
+```bash
+make help      # Show all available commands
+
+# Setup & Build
+make deps      # Install Elixir dependencies
+make setup     # Full setup (deps + assets)
+make build     # Compile the project
+make assets    # Build frontend assets (CSS/JS)
+
+# Development
+make dev       # Start with IEx shell (recommended)
+make server    # Start Phoenix server
+make run       # Alias for 'make server'
+
+# Quality
+make test      # Run all tests
+make lint      # Run Credo linter
+make format    # Format code
+make check     # Run format check, lint, and tests (CI)
+
+# Cleanup
+make clean     # Remove build artifacts
+```
+
 ### Configuration
 
 | Environment Variable | Required | Description |
@@ -285,6 +334,22 @@ Each message includes a short headline plus fields:
 - CPU, GPU, and RAM specs
 - Branch and commit (from `GIT_BRANCH`/`GIT_COMMIT` envs or `git`)
 
+### Web Dashboard
+
+The application includes a Phoenix LiveView dashboard for real-time monitoring.
+
+**URL:** `http://localhost:4000`
+
+**Features:**
+- **Real-time status** - Live status of InputGenerator and Prover with animated indicators
+- **Metrics cards** - Blocks proved, queue lengths, current proving duration
+- **Proved blocks table** - History of proved blocks with Etherscan links
+- **Next block countdown** - Estimated time until the next target block (multiple of 100)
+
+**Screenshot:**
+
+The dashboard uses a dark theme with cyan accents, similar to [ethproofs.org](https://ethproofs.org).
+
 ### Health Endpoint
 
 The application exposes HTTP health endpoints for monitoring and orchestration (e.g., Kubernetes probes).
@@ -293,9 +358,9 @@ The application exposes HTTP health endpoints for monitoring and orchestration (
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /health` | Full health status with component details |
-| `GET /health/ready` | Readiness probe (200 if ready, 503 if not) |
-| `GET /health/live` | Liveness probe (always 200 if server is up) |
+| `GET /api/health` | Full health status with component details |
+| `GET /api/health/ready` | Readiness probe (200 if ready, 503 if not) |
+| `GET /api/health/live` | Liveness probe (always 200 if server is up) |
 
 **Status Levels:**
 
@@ -347,11 +412,11 @@ The application exposes HTTP health endpoints for monitoring and orchestration (
 
 ```bash
 # Check full health status
-curl http://<host>:4000/health | jq
+curl http://localhost:4000/api/health | jq
 
 # Check readiness and liveness
-curl -f http://<host>:4000/health/ready  # Returns 503 if not ready
-curl -f http://<host>:4000/health/live   # Returns 200 if alive
+curl -f http://localhost:4000/api/health/ready  # Returns 503 if not ready
+curl -f http://localhost:4000/api/health/live   # Returns 200 if alive
 ```
 
 ### Output Files

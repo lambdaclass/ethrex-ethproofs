@@ -15,5 +15,38 @@ config :ethproofs_client,
   ethproofs_cluster_id: System.get_env("ETHPROOFS_CLUSTER_ID"),
   slack_webhook: System.get_env("SLACK_WEBHOOK")
 
+# Phoenix endpoint configuration
+config :ethproofs_client, EthProofsClientWeb.Endpoint,
+  url: [host: "localhost"],
+  adapter: Bandit.PhoenixAdapter,
+  render_errors: [
+    formats: [html: EthProofsClientWeb.ErrorHTML],
+    layout: false
+  ],
+  pubsub_server: EthProofsClient.PubSub,
+  live_view: [signing_salt: "ethproofs_salt"]
+
+# Configure esbuild
+config :esbuild,
+  version: "0.17.11",
+  ethproofs_client: [
+    args:
+      ~w(js/app.js --bundle --target=es2017 --outdir=../priv/static/assets --external:/fonts/* --external:/images/*),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => Path.expand("../deps", __DIR__)}
+  ]
+
+# Configure tailwind
+config :tailwind,
+  version: "3.4.0",
+  ethproofs_client: [
+    args: ~w(
+      --config=tailwind.config.js
+      --input=css/app.css
+      --output=../priv/static/assets/app.css
+    ),
+    cd: Path.expand("../assets", __DIR__)
+  ]
+
 # Import environment specific config
 import_config "#{config_env()}.exs"

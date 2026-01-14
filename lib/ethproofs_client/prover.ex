@@ -180,7 +180,7 @@ defmodule EthProofsClient.Prover do
     case :queue.out(queue) do
       {{:value, {block_number, input_path}}, new_queue} ->
         action = if dev_mode?(), do: :execute, else: :prove
-        port = start_prover(state.elf, block_number, input_path, action)
+        port = start_zisk(state.elf, block_number, input_path, action)
         Process.link(port)
 
         if action == :prove do
@@ -208,7 +208,7 @@ defmodule EthProofsClient.Prover do
   # Already running, do nothing
   defp maybe_start_next(state), do: state
 
-  defp start_prover(elf, block_number, input_path, :prove) do
+  defp start_zisk(elf, block_number, input_path, :prove) do
     output_dir = Path.join(@output_dir, Integer.to_string(block_number))
     File.mkdir_p!(output_dir)
 
@@ -222,7 +222,7 @@ defmodule EthProofsClient.Prover do
     )
   end
 
-  defp start_prover(elf, block_number, input_path, :execute) do
+  defp start_zisk(elf, _block_number, input_path, :execute) do
     Port.open(
       {:spawn_executable, System.find_executable("cargo-zisk")},
       [

@@ -227,15 +227,7 @@ defmodule EthProofsClient.Notifications do
         summary = notification_summary(payload)
         Logger.debug("Queueing Slack notification#{format_context(context)}: #{summary}")
 
-        case Task.start(fn -> Slack.notify(payload) end) do
-          {:ok, _pid} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.error(
-              "Failed to start Slack notification task#{format_context(context)}: #{inspect(reason)}"
-            )
-        end
+        Task.start(fn -> Slack.notify(payload) end)
 
       {:disabled, reason} ->
         Logger.debug("Skipping Slack notification#{format_context(context)}: #{reason}")
@@ -257,10 +249,6 @@ defmodule EthProofsClient.Notifications do
     |> Enum.join(", ")
   end
 
-  defp notification_summary(payload) when is_binary(payload) do
-    Helpers.truncate(payload, 200)
-  end
-
   defp notification_summary(payload) do
     case extract_header_text(payload) do
       nil -> inspect(payload, limit: 6, printable_limit: 200)
@@ -277,7 +265,6 @@ defmodule EthProofsClient.Notifications do
 
   defp extract_header_text(_payload), do: nil
 
-  defp format_context(nil), do: ""
   defp format_context(""), do: ""
   defp format_context(context), do: " (" <> context <> ")"
 

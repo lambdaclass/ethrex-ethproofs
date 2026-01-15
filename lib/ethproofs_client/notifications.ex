@@ -213,9 +213,7 @@ defmodule EthProofsClient.Notifications do
   end
 
   defp build_fields_text(fields) do
-    fields
-    |> Enum.map(fn {label, value} -> "*#{label}:* #{value}" end)
-    |> Enum.join("\n")
+    Enum.map_join(fields, "\n", fn {label, value} -> "*#{label}:* #{value}" end)
   end
 
   defp notify(payload, context)

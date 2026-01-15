@@ -189,5 +189,4 @@ defmodule EthProofsClient.EthRpc do
   defp now_ms do
     System.system_time(:millisecond)
   end
-
 end

@@ -282,5 +282,4 @@ defmodule EthProofsClient.Notifications do
   end
 
   defp blank?(value), do: is_nil(value) or value == ""
-
 end

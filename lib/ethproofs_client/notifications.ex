@@ -251,8 +251,6 @@ defmodule EthProofsClient.Notifications do
     end)
   end
 
-  defp extract_header_text(_payload), do: nil
-
   defp format_context(""), do: ""
   defp format_context(context), do: " (" <> context <> ")"
 

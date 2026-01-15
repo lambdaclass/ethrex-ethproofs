@@ -80,8 +80,8 @@ defmodule EthProofsClient.Prover do
         Logger.debug("Block #{block_number} already queued, skipping")
         {:noreply, state}
 
-      currently_proving?(state, block_number) ->
-        Logger.debug("Block #{block_number} already proving, skipping")
+      currently_running?(state, block_number) ->
+        Logger.debug("Block #{block_number} already running, skipping")
         {:noreply, state}
 
       true ->
@@ -176,8 +176,8 @@ defmodule EthProofsClient.Prover do
 
   # --- Private Functions ---
 
-  defp currently_proving?(%{status: {:running, block_number, _port}}, block_number), do: true
-  defp currently_proving?(_state, _block_number), do: false
+  defp currently_running?(%{status: {:running, block_number, _port}}, block_number), do: true
+  defp currently_running?(_state, _block_number), do: false
 
   defp enqueue(state, block_number, input_path) do
     action = if EthProofsClient.Application.dev_mode?(), do: :execute, else: :prove

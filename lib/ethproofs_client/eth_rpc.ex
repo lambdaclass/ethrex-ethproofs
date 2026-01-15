@@ -3,6 +3,7 @@ defmodule EthProofsClient.EthRpc do
 
   use Tesla
 
+  alias EthProofsClient.Helpers
   alias EthProofsClient.Notifications
 
   @request_timeout 30_000
@@ -71,7 +72,7 @@ defmodule EthProofsClient.EthRpc do
         {:error, :timeout}
 
       {:error, reason} ->
-        error = format_error(reason)
+        error = Helpers.format_reason(reason)
         record_failure(url, error)
         {:error, error}
     end
@@ -94,7 +95,7 @@ defmodule EthProofsClient.EthRpc do
         {:ok, value}
 
       {:ok, %{"error" => error}} ->
-        {:error, format_error(error), :responded}
+        {:error, Helpers.format_reason(error), :responded}
 
       {:ok, decoded} ->
         {:error, "Unexpected JSON-RPC response: #{inspect(decoded)}"}
@@ -195,9 +196,4 @@ defmodule EthProofsClient.EthRpc do
   defp now_ms do
     System.system_time(:millisecond)
   end
-
-  defp format_error(%{"message" => message}) when is_binary(message), do: message
-  defp format_error(%{message: message}) when is_binary(message), do: message
-  defp format_error(error) when is_binary(error), do: error
-  defp format_error(error), do: inspect(error)
 end

@@ -4,6 +4,7 @@ defmodule EthProofsClient.Notifications do
   require Logger
 
   alias EthProofsClient.BlockMetadata
+  alias EthProofsClient.Helpers
   alias EthProofsClient.Notifications.Slack
   alias EthProofsClient.Rpc
   alias EthProofsClient.SystemInfo
@@ -166,21 +167,11 @@ defmodule EthProofsClient.Notifications do
   defp format_timestamp_ms(ms) when is_integer(ms) do
     ms
     |> DateTime.from_unix!(:millisecond)
-    |> format_gmt_minus_3()
+    |> Helpers.format_local_datetime()
     |> code_value()
   end
 
   defp format_timestamp_ms(_), do: nil
-
-  defp format_gmt_minus_3(%DateTime{} = datetime) do
-    offset_seconds = -3 * 60 * 60
-    local = DateTime.add(datetime, offset_seconds, :second)
-    naive = DateTime.to_naive(local)
-    {microseconds, _precision} = naive.microsecond
-    millis = div(microseconds, 1000)
-    naive = %{naive | microsecond: {millis * 1000, 3}}
-    NaiveDateTime.to_iso8601(naive) <> "-03:00"
-  end
 
   defp format_duration_ms(ms) when is_integer(ms) and ms >= 0 do
     seconds = div(ms, 1000)
@@ -267,13 +258,13 @@ defmodule EthProofsClient.Notifications do
   end
 
   defp notification_summary(payload) when is_binary(payload) do
-    truncate(payload, 200)
+    Helpers.truncate(payload, 200)
   end
 
   defp notification_summary(payload) do
     case extract_header_text(payload) do
       nil -> inspect(payload, limit: 6, printable_limit: 200)
-      text -> truncate(text, 200)
+      text -> Helpers.truncate(text, 200)
     end
   end
 
@@ -285,14 +276,6 @@ defmodule EthProofsClient.Notifications do
   end
 
   defp extract_header_text(_payload), do: nil
-
-  defp truncate(text, limit) when is_binary(text) and is_integer(limit) do
-    if String.length(text) > limit do
-      String.slice(text, 0, limit) <> "..."
-    else
-      text
-    end
-  end
 
   defp format_context(nil), do: ""
   defp format_context(""), do: ""
@@ -329,9 +312,7 @@ defmodule EthProofsClient.Notifications do
     |> maybe_add_missing("ethproofs_rpc_url", Rpc.ethproofs_rpc_url())
   end
 
-  defp maybe_add_missing(keys, _label, value) when not is_nil(value) and value != "",
-    do: keys
-
+  defp maybe_add_missing(keys, _label, value) when not is_nil(value) and value != "", do: keys
   defp maybe_add_missing(keys, label, _value), do: keys ++ [label]
 
   defp enabled? do

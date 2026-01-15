@@ -15,6 +15,65 @@ defmodule EthProofsClient.Helpers do
   end
 
   @doc """
+  Formats a unix timestamp (milliseconds) in the local timezone.
+  """
+  def format_timestamp_ms(ms) when is_integer(ms) do
+    ms
+    |> DateTime.from_unix!(:millisecond)
+    |> format_local_datetime()
+    |> code_value()
+  end
+
+  def format_timestamp_ms(_), do: nil
+
+  @doc """
+  Formats a duration in milliseconds as a short string.
+  """
+  def format_duration_ms(ms) when is_integer(ms) and ms >= 0 do
+    seconds = div(ms, 1000)
+    minutes = div(seconds, 60)
+    hours = div(minutes, 60)
+    seconds_rem = rem(seconds, 60)
+    minutes_rem = rem(minutes, 60)
+
+    formatted =
+      cond do
+        hours > 0 -> "#{hours}h #{minutes_rem}m"
+        minutes > 0 -> "#{minutes}m #{seconds_rem}s"
+        true -> "#{seconds}s"
+      end
+
+    code_value(formatted)
+  end
+
+  def format_duration_ms(_), do: nil
+
+  @doc """
+  Wraps a value in backticks for code display.
+  """
+  def code_value(value) when is_integer(value), do: "`#{value}`"
+  def code_value(value) when is_binary(value), do: "`#{value}`"
+  def code_value(value), do: "`#{inspect(value)}`"
+
+  @doc """
+  Normalizes a reason value into a readable string.
+  """
+  def format_reason(reason) when is_binary(reason), do: reason
+  def format_reason(reason), do: inspect(reason)
+
+  @doc """
+  Computes a non-negative duration in milliseconds between two timestamps.
+  """
+  def duration_ms(nil, _), do: nil
+  def duration_ms(_, nil), do: nil
+
+  def duration_ms(start_ms, end_ms) when is_integer(start_ms) and is_integer(end_ms) do
+    max(end_ms - start_ms, 0)
+  end
+
+  def duration_ms(_, _), do: nil
+
+  @doc """
   Formats a DateTime in the local timezone using ISO8601 format.
   """
   def format_local_datetime(%DateTime{} = datetime) do

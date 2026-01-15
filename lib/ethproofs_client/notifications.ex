@@ -63,9 +63,12 @@ defmodule EthProofsClient.Notifications do
       fn ->
         fields =
           []
-          |> add_field("RPC URL", code_value(url))
-          |> maybe_add_field("Down since", format_timestamp_ms(down_since_ms))
-          |> maybe_add_field("Last error", reason && code_value(format_reason(reason)))
+          |> add_field("RPC URL", Helpers.code_value(url))
+          |> maybe_add_field("Down since", Helpers.format_timestamp_ms(down_since_ms))
+          |> maybe_add_field(
+            "Last error",
+            reason && Helpers.code_value(Helpers.format_reason(reason))
+          )
 
         headline = ":x: ETH RPC down: #{url}"
         %{blocks: build_message_blocks(headline, fields)}
@@ -79,12 +82,12 @@ defmodule EthProofsClient.Notifications do
       fn ->
         fields =
           []
-          |> add_field("RPC URL", code_value(url))
-          |> maybe_add_field("Down since", format_timestamp_ms(down_since_ms))
-          |> maybe_add_field("Recovered at", format_timestamp_ms(recovered_at_ms))
+          |> add_field("RPC URL", Helpers.code_value(url))
+          |> maybe_add_field("Down since", Helpers.format_timestamp_ms(down_since_ms))
+          |> maybe_add_field("Recovered at", Helpers.format_timestamp_ms(recovered_at_ms))
           |> maybe_add_field(
             "Downtime",
-            format_duration_ms(duration_ms(down_since_ms, recovered_at_ms))
+            Helpers.format_duration_ms(Helpers.duration_ms(down_since_ms, recovered_at_ms))
           )
 
         headline = ":white_check_mark: ETH RPC recovered: #{url}"
@@ -101,8 +104,11 @@ defmodule EthProofsClient.Notifications do
       fn ->
         fields =
           []
-          |> maybe_add_field("Step", opts[:step] && code_value(opts[:step]))
-          |> maybe_add_field("Reason", opts[:reason] && code_value(format_reason(opts[:reason])))
+          |> maybe_add_field("Step", opts[:step] && Helpers.code_value(opts[:step]))
+          |> maybe_add_field(
+            "Reason",
+            opts[:reason] && Helpers.code_value(Helpers.format_reason(opts[:reason]))
+          )
           |> maybe_add_field("Proving time", format_proving_time(opts[:proving_time_ms]))
           |> add_block_fields(block_number)
           |> add_system_fields()
@@ -137,17 +143,17 @@ defmodule EthProofsClient.Notifications do
       end
 
     fields
-    |> add_field("Gas used", code_value(gas_used))
-    |> add_field("Tx count", code_value(tx_count))
+    |> add_field("Gas used", Helpers.code_value(gas_used))
+    |> add_field("Tx count", Helpers.code_value(tx_count))
   end
 
   defp add_system_fields(fields) do
     info = SystemInfo.get()
 
     fields
-    |> add_field("GPU", code_value(info.gpu || "unknown"))
-    |> add_field("CPU", code_value(info.cpu || "unknown"))
-    |> add_field("RAM", code_value(info.ram || "unknown"))
+    |> add_field("GPU", Helpers.code_value(info.gpu || "unknown"))
+    |> add_field("CPU", Helpers.code_value(info.cpu || "unknown"))
+    |> add_field("RAM", Helpers.code_value(info.ram || "unknown"))
     |> add_field("Branch & Commit", format_branch_commit(info))
   end
 
@@ -159,43 +165,15 @@ defmodule EthProofsClient.Notifications do
 
   defp format_proving_time(ms) when is_integer(ms) do
     seconds = Float.round(ms / 1000, 2)
-    code_value("#{seconds}s")
+    Helpers.code_value("#{seconds}s")
   end
 
   defp format_proving_time(_), do: nil
 
-  defp format_timestamp_ms(ms) when is_integer(ms) do
-    ms
-    |> DateTime.from_unix!(:millisecond)
-    |> Helpers.format_local_datetime()
-    |> code_value()
-  end
-
-  defp format_timestamp_ms(_), do: nil
-
-  defp format_duration_ms(ms) when is_integer(ms) and ms >= 0 do
-    seconds = div(ms, 1000)
-    minutes = div(seconds, 60)
-    hours = div(minutes, 60)
-    seconds_rem = rem(seconds, 60)
-    minutes_rem = rem(minutes, 60)
-
-    formatted =
-      cond do
-        hours > 0 -> "#{hours}h #{minutes_rem}m"
-        minutes > 0 -> "#{minutes}m #{seconds_rem}s"
-        true -> "#{seconds}s"
-      end
-
-    code_value(formatted)
-  end
-
-  defp format_duration_ms(_), do: nil
-
   defp format_branch_commit(%{branch: branch, commit: commit}) do
     branch = branch || "unknown"
     commit = commit || "unknown"
-    "#{code_value(branch)} (#{code_value(commit)})"
+    "#{Helpers.code_value(branch)} (#{Helpers.code_value(commit)})"
   end
 
   defp build_message_blocks(headline, fields) do
@@ -305,19 +283,4 @@ defmodule EthProofsClient.Notifications do
 
   defp blank?(value), do: is_nil(value) or value == ""
 
-  defp code_value(value) when is_integer(value), do: "`#{value}`"
-  defp code_value(value) when is_binary(value), do: "`#{value}`"
-  defp code_value(value), do: "`#{inspect(value)}`"
-
-  defp format_reason(reason) when is_binary(reason), do: reason
-  defp format_reason(reason), do: inspect(reason)
-
-  defp duration_ms(nil, _), do: nil
-  defp duration_ms(_, nil), do: nil
-
-  defp duration_ms(start_ms, end_ms) when is_integer(start_ms) and is_integer(end_ms) do
-    max(end_ms - start_ms, 0)
-  end
-
-  defp duration_ms(_, _), do: nil
 end

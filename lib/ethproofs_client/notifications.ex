@@ -206,14 +206,10 @@ defmodule EthProofsClient.Notifications do
       }
     ]
 
-    case build_fields_text(fields) do
+    case Enum.map_join(fields, "\n", fn {label, value} -> "*#{label}:* #{value}" end) do
       "" -> blocks
       text -> blocks ++ [%{type: "section", text: %{type: "mrkdwn", text: text}}]
     end
-  end
-
-  defp build_fields_text(fields) do
-    Enum.map_join(fields, "\n", fn {label, value} -> "*#{label}:* #{value}" end)
   end
 
   defp notify(payload, context)

@@ -58,6 +58,26 @@ defmodule EthProofsClient.Helpers do
   @doc """
   Normalizes a reason value into a readable string.
   """
+  def format_reason({:rpc_get_block_by_number, reason}) do
+    "RPC eth_getBlockByNumber failed: #{format_reason(reason)}"
+  end
+
+  def format_reason({:rpc_debug_execution_witness, reason}) do
+    "RPC debug_executionWitness failed: #{format_reason(reason)}"
+  end
+
+  def format_reason({:block_metadata, :invalid_block_data}) do
+    "Block metadata parse failed (gasUsed/transactions missing or invalid)"
+  end
+
+  def format_reason({:input_generation, reason}) do
+    "Input generator failed: #{format_reason(reason)}"
+  end
+
+  def format_reason(:timeout) do
+    "timeout (request did not respond before client timeout)"
+  end
+
   def format_reason(reason) when is_binary(reason), do: reason
   def format_reason(reason), do: inspect(reason)
 

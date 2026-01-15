@@ -207,16 +207,13 @@ defmodule EthProofsClient.InputGenerator do
   defp maybe_start_next(state), do: state
 
   defp do_generate_input(block_number) do
-    with {:ok, block_json_bytes} <-
-           EthProofsClient.EthRpc.get_block_by_number(block_number, true, raw: true),
-         _ <- BlockMetadata.put_from_json(block_number, block_json_bytes),
-         {:ok, witness_json_bytes} <-
-           EthProofsClient.EthRpc.debug_execution_witness(block_number, raw: true),
-         {:ok, input_path} <- generate_input(block_json_bytes, witness_json_bytes) do
+    with {:ok, block_json_bytes} <- fetch_block(block_number),
+         :ok <- store_block_metadata(block_number, block_json_bytes),
+         {:ok, witness_json_bytes} <- fetch_witness(block_number),
+         {:ok, input_path} <- build_input(block_json_bytes, witness_json_bytes) do
       {:ok, input_path}
     else
       {:error, reason} -> {:error, reason}
-      error -> {:error, error}
     end
   end
 
@@ -253,6 +250,34 @@ defmodule EthProofsClient.InputGenerator do
 
   defp schedule_fetch do
     Process.send_after(self(), :fetch_latest_block_number, @block_fetch_interval)
+  end
+
+  defp fetch_block(block_number) do
+    case EthProofsClient.EthRpc.get_block_by_number(block_number, true, raw: true) do
+      {:ok, block_json_bytes} -> {:ok, block_json_bytes}
+      {:error, reason} -> {:error, {:rpc_get_block_by_number, reason}}
+    end
+  end
+
+  defp store_block_metadata(block_number, block_json_bytes) do
+    case BlockMetadata.put_from_json(block_number, block_json_bytes) do
+      :ok -> :ok
+      :error -> {:error, {:block_metadata, :invalid_block_data}}
+    end
+  end
+
+  defp fetch_witness(block_number) do
+    case EthProofsClient.EthRpc.debug_execution_witness(block_number, raw: true) do
+      {:ok, witness_json_bytes} -> {:ok, witness_json_bytes}
+      {:error, reason} -> {:error, {:rpc_debug_execution_witness, reason}}
+    end
+  end
+
+  defp build_input(block_json_bytes, witness_json_bytes) do
+    case generate_input(block_json_bytes, witness_json_bytes) do
+      {:ok, input_path} -> {:ok, input_path}
+      {:error, reason} -> {:error, {:input_generation, reason}}
+    end
   end
 
   defp sanitize_status(:idle), do: :idle

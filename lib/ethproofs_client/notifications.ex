@@ -271,14 +271,15 @@ defmodule EthProofsClient.Notifications do
   end
 
   defp disabled_reason do
-    reasons = []
-    reasons = if slack_enabled?(), do: reasons, else: reasons ++ ["slack_webhook missing"]
-
     reasons =
-      case missing_config_keys() do
-        [] -> reasons
-        missing -> reasons ++ ["ethproofs config missing: #{Enum.join(missing, ", ")}"]
-      end
+      [
+        unless(slack_enabled?(), do: "slack_webhook missing"),
+        case missing_config_keys() do
+          [] -> nil
+          keys -> "ethproofs config missing: #{Enum.join(keys, ", ")}"
+        end
+      ]
+      |> Enum.reject(&is_nil/1)
 
     case reasons do
       [] -> "notifications disabled"

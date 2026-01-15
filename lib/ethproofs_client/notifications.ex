@@ -122,7 +122,7 @@ defmodule EthProofsClient.Notifications do
         _ -> nil
       end
 
-    prefix = if is_binary(emoji), do: emoji <> " ", else: ""
+    prefix = if emoji, do: emoji <> " ", else: ""
     prefix <> message
   end
 

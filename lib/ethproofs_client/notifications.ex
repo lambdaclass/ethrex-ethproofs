@@ -212,8 +212,6 @@ defmodule EthProofsClient.Notifications do
     end
   end
 
-  defp notify(payload, context)
-
   defp notify(build_fun, context) when is_function(build_fun, 0) do
     case notification_status() do
       :enabled ->
@@ -228,10 +226,6 @@ defmodule EthProofsClient.Notifications do
     end
 
     :ok
-  end
-
-  defp notify(payload, context) do
-    notify(fn -> payload end, context)
   end
 
   defp notification_context(block_number, opts) do
@@ -302,11 +296,7 @@ defmodule EthProofsClient.Notifications do
   end
 
   defp slack_enabled? do
-    case Application.get_env(:ethproofs_client, :slack_webhook) do
-      nil -> false
-      "" -> false
-      _ -> true
-    end
+    not blank?(Application.get_env(:ethproofs_client, :slack_webhook))
   end
 
   defp ethproofs_configured? do

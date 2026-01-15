@@ -249,15 +249,8 @@ defmodule EthProofsClient.Prover do
           "Proved block #{block_number} in #{proof_data.time / 1000} seconds using #{proof_data.cycles} cycles"
         )
 
-        case report_proved(block_number, proof_data) do
-          {:ok, _proof_id} ->
-            if exit_status == 0 do
-              Notifications.proof_submitted(block_number, proof_data.time)
-            end
-
-          {:error, _reason} ->
-            :ok
-        end
+        report_proved(block_number, proof_data)
+        |> maybe_notify_proof_submitted(block_number, proof_data.time, exit_status)
 
       {:error, reason} ->
         Logger.error(
@@ -274,6 +267,12 @@ defmodule EthProofsClient.Prover do
 
     %{state | status: :idle, proving_since: nil}
   end
+
+  defp maybe_notify_proof_submitted({:ok, _proof_id}, block_number, proving_time, 0) do
+    Notifications.proof_submitted(block_number, proving_time)
+  end
+
+  defp maybe_notify_proof_submitted(_result, _block_number, _proving_time, _exit_status), do: :ok
 
   defp handle_execution_completion(state, block_number, exit_status) do
     if exit_status == 0 do

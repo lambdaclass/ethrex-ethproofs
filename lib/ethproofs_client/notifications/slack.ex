@@ -4,6 +4,8 @@ defmodule EthProofsClient.Notifications.Slack do
 
   use Tesla
 
+  alias EthProofsClient.Helpers
+
   plug(Tesla.Middleware.Headers, [{"content-type", "application/json"}])
 
   def notify(payload) when is_map(payload), do: send_payload(payload)
@@ -46,23 +48,15 @@ defmodule EthProofsClient.Notifications.Slack do
   end
 
   defp payload_summary(%{text: text}) when is_binary(text) do
-    truncate(text, 200)
+    Helpers.truncate(text, 200)
   end
 
   defp payload_summary(%{blocks: blocks}) when is_list(blocks) do
     Enum.find_value(blocks, "blocks", fn
-      %{type: "header", text: %{text: text}} when is_binary(text) -> truncate(text, 200)
+      %{type: "header", text: %{text: text}} when is_binary(text) -> Helpers.truncate(text, 200)
       _ -> nil
     end)
   end
 
   defp payload_summary(_payload), do: "payload"
-
-  defp truncate(text, limit) when is_binary(text) and is_integer(limit) do
-    if String.length(text) > limit do
-      String.slice(text, 0, limit) <> "..."
-    else
-      text
-    end
-  end
 end

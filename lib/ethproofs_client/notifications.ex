@@ -4,6 +4,7 @@ defmodule EthProofsClient.Notifications do
   require Logger
 
   alias EthProofsClient.BlockMetadata
+  alias EthProofsClient.Helpers
   alias EthProofsClient.Notifications.Slack
   alias EthProofsClient.Rpc
   alias EthProofsClient.SystemInfo
@@ -121,7 +122,7 @@ defmodule EthProofsClient.Notifications do
         _ -> nil
       end
 
-    prefix = if is_binary(emoji), do: emoji <> " ", else: ""
+    prefix = if emoji, do: emoji <> " ", else: ""
     prefix <> message
   end
 
@@ -166,21 +167,11 @@ defmodule EthProofsClient.Notifications do
   defp format_timestamp_ms(ms) when is_integer(ms) do
     ms
     |> DateTime.from_unix!(:millisecond)
-    |> format_gmt_minus_3()
+    |> Helpers.format_local_datetime()
     |> code_value()
   end
 
   defp format_timestamp_ms(_), do: nil
-
-  defp format_gmt_minus_3(%DateTime{} = datetime) do
-    offset_seconds = -3 * 60 * 60
-    local = DateTime.add(datetime, offset_seconds, :second)
-    naive = DateTime.to_naive(local)
-    {microseconds, _precision} = naive.microsecond
-    millis = div(microseconds, 1000)
-    naive = %{naive | microsecond: {millis * 1000, 3}}
-    NaiveDateTime.to_iso8601(naive) <> "-03:00"
-  end
 
   defp format_duration_ms(ms) when is_integer(ms) and ms >= 0 do
     seconds = div(ms, 1000)
@@ -215,19 +206,11 @@ defmodule EthProofsClient.Notifications do
       }
     ]
 
-    case build_fields_text(fields) do
+    case Enum.map_join(fields, "\n", fn {label, value} -> "*#{label}:* #{value}" end) do
       "" -> blocks
       text -> blocks ++ [%{type: "section", text: %{type: "mrkdwn", text: text}}]
     end
   end
-
-  defp build_fields_text(fields) do
-    fields
-    |> Enum.map(fn {label, value} -> "*#{label}:* #{value}" end)
-    |> Enum.join("\n")
-  end
-
-  defp notify(payload, context)
 
   defp notify(build_fun, context) when is_function(build_fun, 0) do
     case notification_status() do
@@ -236,25 +219,13 @@ defmodule EthProofsClient.Notifications do
         summary = notification_summary(payload)
         Logger.debug("Queueing Slack notification#{format_context(context)}: #{summary}")
 
-        case Task.start(fn -> Slack.notify(payload) end) do
-          {:ok, _pid} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.error(
-              "Failed to start Slack notification task#{format_context(context)}: #{inspect(reason)}"
-            )
-        end
+        Task.start(fn -> Slack.notify(payload) end)
 
       {:disabled, reason} ->
         Logger.debug("Skipping Slack notification#{format_context(context)}: #{reason}")
     end
 
     :ok
-  end
-
-  defp notify(payload, context) do
-    notify(fn -> payload end, context)
   end
 
   defp notification_context(block_number, opts) do
@@ -266,14 +237,10 @@ defmodule EthProofsClient.Notifications do
     |> Enum.join(", ")
   end
 
-  defp notification_summary(payload) when is_binary(payload) do
-    truncate(payload, 200)
-  end
-
   defp notification_summary(payload) do
     case extract_header_text(payload) do
       nil -> inspect(payload, limit: 6, printable_limit: 200)
-      text -> truncate(text, 200)
+      text -> Helpers.truncate(text, 200)
     end
   end
 
@@ -284,17 +251,6 @@ defmodule EthProofsClient.Notifications do
     end)
   end
 
-  defp extract_header_text(_payload), do: nil
-
-  defp truncate(text, limit) when is_binary(text) and is_integer(limit) do
-    if String.length(text) > limit do
-      String.slice(text, 0, limit) <> "..."
-    else
-      text
-    end
-  end
-
-  defp format_context(nil), do: ""
   defp format_context(""), do: ""
   defp format_context(context), do: " (" <> context <> ")"
 
@@ -307,14 +263,15 @@ defmodule EthProofsClient.Notifications do
   end
 
   defp disabled_reason do
-    reasons = []
-    reasons = if slack_enabled?(), do: reasons, else: reasons ++ ["slack_webhook missing"]
-
     reasons =
-      case missing_config_keys() do
-        [] -> reasons
-        missing -> reasons ++ ["ethproofs config missing: #{Enum.join(missing, ", ")}"]
-      end
+      [
+        unless(slack_enabled?(), do: "slack_webhook missing"),
+        case missing_config_keys() do
+          [] -> nil
+          keys -> "ethproofs config missing: #{Enum.join(keys, ", ")}"
+        end
+      ]
+      |> Enum.reject(&is_nil/1)
 
     case reasons do
       [] -> "notifications disabled"
@@ -329,9 +286,7 @@ defmodule EthProofsClient.Notifications do
     |> maybe_add_missing("ethproofs_rpc_url", Rpc.ethproofs_rpc_url())
   end
 
-  defp maybe_add_missing(keys, _label, value) when not is_nil(value) and value != "",
-    do: keys
-
+  defp maybe_add_missing(keys, _label, value) when not is_nil(value) and value != "", do: keys
   defp maybe_add_missing(keys, label, _value), do: keys ++ [label]
 
   defp enabled? do
@@ -339,11 +294,7 @@ defmodule EthProofsClient.Notifications do
   end
 
   defp slack_enabled? do
-    case Application.get_env(:ethproofs_client, :slack_webhook) do
-      nil -> false
-      "" -> false
-      _ -> true
-    end
+    not blank?(Application.get_env(:ethproofs_client, :slack_webhook))
   end
 
   defp ethproofs_configured? do

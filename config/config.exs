@@ -12,7 +12,8 @@ config :ethproofs_client,
   elf_path: System.get_env("ELF_PATH"),
   ethproofs_rpc_url: System.get_env("ETHPROOFS_RPC_URL"),
   ethproofs_api_key: System.get_env("ETHPROOFS_API_KEY"),
-  ethproofs_cluster_id: System.get_env("ETHPROOFS_CLUSTER_ID")
+  ethproofs_cluster_id: System.get_env("ETHPROOFS_CLUSTER_ID"),
+  slack_webhook: System.get_env("SLACK_WEBHOOK")
 
 # Import environment specific config
 import_config "#{config_env()}.exs"

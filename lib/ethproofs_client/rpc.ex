@@ -50,7 +50,7 @@ defmodule EthProofsClient.Rpc do
   end
 
   defp send_request(endpoint, body, persist_body \\ false) do
-    if dev_mode?() do
+    if EthProofsClient.Application.dev_mode?() do
       Logger.info("DEV mode enabled; skipping EthProofs API call to #{endpoint}")
       {:ok, :skipped}
     else
@@ -86,10 +86,6 @@ defmodule EthProofsClient.Rpc do
           {:error, "HTTP request failed: #{reason}"}
       end
     end
-  end
-
-  defp dev_mode? do
-    Application.get_env(:ethproofs_client, :dev, false) == true
   end
 
   defp handle_response(rsp) do

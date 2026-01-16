@@ -19,6 +19,21 @@ defmodule EthProofsClient.Application do
   use Application
   require Logger
 
+  @doc """
+  Returns true if the application is running in DEV mode.
+  In DEV mode, cargo-zisk runs `execute` instead of `prove` and EthProofs API calls are skipped.
+  """
+  def dev_mode? do
+    Application.get_env(:ethproofs_client, :dev, false) == true
+  end
+
+  @doc """
+  Returns the action to perform based on the application mode.
+  """
+  def prover_action do
+    if dev_mode?(), do: :execute, else: :prove
+  end
+
   alias EthProofsClient.HealthRouter
   alias EthProofsClient.InputGenerator
   alias EthProofsClient.Prover
@@ -30,9 +45,7 @@ defmodule EthProofsClient.Application do
       Application.get_env(:ethproofs_client, :elf_path) ||
         raise "ELF_PATH environment variable must be set"
 
-    dev_mode = Application.get_env(:ethproofs_client, :dev, false) == true
-
-    if not dev_mode do
+    if not dev_mode?() do
       ensure_ethproofs_env!()
     end
 

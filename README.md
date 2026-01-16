@@ -266,11 +266,24 @@ A `Task.Supervisor` that supervises async tasks spawned by InputGenerator.
 | `ETHPROOFS_API_KEY` | No | EthProofs API authentication token (required unless `DEV=true`) |
 | `ETHPROOFS_CLUSTER_ID` | No | EthProofs cluster identifier (required unless `DEV=true`) |
 | `DEV` | No | When `true`, disables EthProofs API calls and uses `cargo-zisk execute` |
+| `SLACK_WEBHOOK` | No | Slack incoming webhook URL for notifications |
 | `LOG_LEVEL` | No | Logging level (`debug`, `info`, `warning`, `error`) |
 | `HEALTH_PORT` | No | Port for health HTTP endpoint (default: 4000) |
 | `PROVER_STUCK_THRESHOLD_SECONDS` | No | Seconds before prover is considered stuck (default: 3600). Increase for multi-GPU setups. |
 
 > **Note:** When `DEV=true`, the client executes without reporting to the EthProofs API. When `DEV=false`, `ETHPROOFS_*` variables are required.
+
+### Slack Notifications
+
+Slack notifications are sent when `SLACK_WEBHOOK` is set and all `ETHPROOFS_*` variables are present. Notifications cover input generation, proof generation, proof data reads, and EthProofs API requests. Success messages are sent after a proof is submitted.
+
+Each message includes a short headline plus fields:
+- Block number
+- Step and reason (for failures)
+- Proving time (for successes)
+- Gas used and transaction count (from `eth_getBlockByNumber`; `unknown` if the block fetch failed)
+- CPU, GPU, and RAM specs
+- Branch and commit (from `GIT_BRANCH`/`GIT_COMMIT` envs or `git`)
 
 ### Health Endpoint
 

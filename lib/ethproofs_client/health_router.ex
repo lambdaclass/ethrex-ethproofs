@@ -79,12 +79,10 @@ defmodule EthProofsClient.HealthRouter do
         threshold = prover_stuck_threshold()
 
         health_status =
-          cond do
-            proving_duration != nil and proving_duration > threshold ->
-              "stuck"
-
-            true ->
-              "up"
+          if proving_duration != nil and proving_duration > threshold do
+            "stuck"
+          else
+            "up"
           end
 
         %{

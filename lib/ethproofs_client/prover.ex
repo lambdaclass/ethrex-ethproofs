@@ -12,7 +12,10 @@ defmodule EthProofsClient.Prover do
   use GenServer
   require Logger
 
+  alias EthProofsClient.Notifications
+
   @output_dir "output"
+
   defstruct [
     :status,
     :elf,
@@ -47,7 +50,7 @@ defmodule EthProofsClient.Prover do
   def init(%{elf: elf}) do
     Process.flag(:trap_exit, true)
 
-    if dev_mode?() do
+    if EthProofsClient.Application.dev_mode?() do
       Logger.info(
         "DEV mode enabled; using cargo-zisk execute and skipping EthProofs API reporting."
       )
@@ -81,7 +84,7 @@ defmodule EthProofsClient.Prover do
         {:noreply, state}
 
       true ->
-        if not dev_mode?() do
+        if not EthProofsClient.Application.dev_mode?() do
           report_queued(block_number)
         end
 
@@ -92,21 +95,17 @@ defmodule EthProofsClient.Prover do
 
   # Handle port data output (logging only)
   @impl true
-  def handle_info(
-        {port, {:data, data}},
-        %{status: {:running, _block_number, port}} = state
-      ) do
+  def handle_info({port, {:data, data}}, %{status: {:running, _block_number, port}} = state) do
     Logger.debug("cargo-zisk output: #{data}")
     {:noreply, state}
   end
 
-  # Handle normal port exit - this is the primary completion handler
   @impl true
   def handle_info(
         {port, {:exit_status, exit_status}},
         %{status: {:running, block_number, port}} = state
       ) do
-    action = if dev_mode?(), do: :execute, else: :prove
+    action = EthProofsClient.Application.prover_action()
 
     Logger.info(
       "cargo-zisk #{action} exited with status #{exit_status} for block #{block_number}"
@@ -127,13 +126,17 @@ defmodule EthProofsClient.Prover do
 
   # Handle abnormal port termination (only if exit_status wasn't received)
   @impl true
-  def handle_info(
-        {:EXIT, port, reason},
-        %{status: {:running, block_number, port}} = state
-      ) do
+  def handle_info({:EXIT, port, reason}, %{status: {:running, block_number, port}} = state) do
     Logger.warning(
       "Port died unexpectedly for block #{block_number}: #{inspect(reason)}. Continuing with next item."
     )
+
+    if not EthProofsClient.Application.dev_mode?() do
+      Notifications.proof_generation_failed(
+        block_number,
+        "cargo-zisk port died: #{inspect(reason)}"
+      )
+    end
 
     new_state = %{state | status: :idle, proving_since: nil}
     {:noreply, maybe_start_next(new_state)}
@@ -161,11 +164,10 @@ defmodule EthProofsClient.Prover do
   # --- Private Functions ---
 
   defp currently_running?(%{status: {:running, block_number, _port}}, block_number), do: true
-
   defp currently_running?(_state, _block_number), do: false
 
   defp enqueue(state, block_number, input_path) do
-    action = if dev_mode?(), do: :execute, else: :prove
+    action = EthProofsClient.Application.prover_action()
 
     Logger.info("Enqueued block #{block_number} for #{action} (input: #{input_path})")
 
@@ -179,7 +181,7 @@ defmodule EthProofsClient.Prover do
   defp maybe_start_next(%{status: :idle, queue: queue} = state) do
     case :queue.out(queue) do
       {{:value, {block_number, input_path}}, new_queue} ->
-        action = if dev_mode?(), do: :execute, else: :prove
+        action = EthProofsClient.Application.prover_action()
         port = start_zisk(state.elf, block_number, input_path, action)
         Process.link(port)
 
@@ -234,6 +236,13 @@ defmodule EthProofsClient.Prover do
   end
 
   defp handle_proof_completion(state, block_number, exit_status) do
+    if exit_status != 0 do
+      Notifications.proof_generation_failed(
+        block_number,
+        "cargo-zisk exited with status #{exit_status}"
+      )
+    end
+
     case read_proof_data(block_number) do
       {:ok, proof_data} ->
         Logger.info(
@@ -241,15 +250,29 @@ defmodule EthProofsClient.Prover do
         )
 
         report_proved(block_number, proof_data)
+        |> maybe_notify_proof_submitted(block_number, proof_data.time, exit_status)
 
       {:error, reason} ->
         Logger.error(
           "Failed to read proof data for block #{block_number} (exit_status: #{exit_status}): #{inspect(reason)}"
         )
+
+        if exit_status == 0 do
+          Notifications.proof_data_failed(
+            block_number,
+            "exit_status #{exit_status}: #{inspect(reason)}"
+          )
+        end
     end
 
     %{state | status: :idle, proving_since: nil}
   end
+
+  defp maybe_notify_proof_submitted({:ok, _proof_id}, block_number, proving_time, 0) do
+    Notifications.proof_submitted(block_number, proving_time)
+  end
+
+  defp maybe_notify_proof_submitted(_result, _block_number, _proving_time, _exit_status), do: :ok
 
   defp handle_execution_completion(state, block_number, exit_status) do
     if exit_status == 0 do
@@ -266,11 +289,15 @@ defmodule EthProofsClient.Prover do
   defp read_proof_data(block_number) do
     block_dir = Integer.to_string(block_number)
     result_path = Path.join([@output_dir, block_dir, "result.json"])
-    proof_path = Path.join([@output_dir, block_dir, "vadcop_final_proof.compressed.bin"])
+
+    proof_paths = [
+      Path.join([@output_dir, block_dir, "vadcop_final_proof.compressed.bin"]),
+      Path.join([@output_dir, block_dir, "vadcop_final_proof.bin"])
+    ]
 
     with {:ok, result_content} <- File.read(result_path),
          {:ok, %{"cycles" => cycles, "time" => time, "id" => id}} <- Jason.decode(result_content),
-         {:ok, proof_binary} <- File.read(proof_path) do
+         {:ok, proof_binary} <- read_first_file(proof_paths) do
       {:ok,
        %{
          cycles: cycles,
@@ -284,6 +311,15 @@ defmodule EthProofsClient.Prover do
     end
   end
 
+  defp read_first_file(paths) do
+    Enum.reduce_while(paths, {:error, :enoent}, fn path, _acc ->
+      case File.read(path) do
+        {:ok, contents} -> {:halt, {:ok, contents}}
+        {:error, _reason} -> {:cont, {:error, :enoent}}
+      end
+    end)
+  end
+
   defp sanitize_status(:idle), do: :idle
   defp sanitize_status({:running, block_number, _port}), do: {:running, block_number}
 
@@ -291,10 +327,6 @@ defmodule EthProofsClient.Prover do
 
   defp proving_duration(%{proving_since: since}) do
     DateTime.diff(DateTime.utc_now(), since, :second)
-  end
-
-  defp dev_mode? do
-    Application.get_env(:ethproofs_client, :dev, false) == true
   end
 
   # --- API Reporting Functions ---
@@ -306,6 +338,7 @@ defmodule EthProofsClient.Prover do
 
       {:error, reason} ->
         Logger.error("Failed to report queued status for block #{block_number}: #{reason}")
+        Notifications.ethproofs_request_failed(block_number, "queued", reason)
     end
   end
 
@@ -316,6 +349,7 @@ defmodule EthProofsClient.Prover do
 
       {:error, reason} ->
         Logger.error("Failed to report proving status for block #{block_number}: #{reason}")
+        Notifications.ethproofs_request_failed(block_number, "proving", reason)
     end
   end
 
@@ -327,11 +361,13 @@ defmodule EthProofsClient.Prover do
            proof_data.proof,
            proof_data.verifier_id
          ) do
-      {:ok, _proof_id} ->
-        :ok
+      {:ok, _proof_id} = ok ->
+        ok
 
-      {:error, reason} ->
+      {:error, reason} = error ->
         Logger.error("Failed to report proved status for block #{block_number}: #{reason}")
+        Notifications.ethproofs_request_failed(block_number, "proved", reason)
+        error
     end
   end
 end

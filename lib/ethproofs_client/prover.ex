@@ -105,7 +105,7 @@ defmodule EthProofsClient.Prover do
         {port, {:exit_status, exit_status}},
         %{status: {:running, block_number, port}} = state
       ) do
-    action = if EthProofsClient.Application.dev_mode?(), do: :execute, else: :prove
+    action = EthProofsClient.Application.prover_action()
 
     Logger.info(
       "cargo-zisk #{action} exited with status #{exit_status} for block #{block_number}"
@@ -167,7 +167,7 @@ defmodule EthProofsClient.Prover do
   defp currently_running?(_state, _block_number), do: false
 
   defp enqueue(state, block_number, input_path) do
-    action = if EthProofsClient.Application.dev_mode?(), do: :execute, else: :prove
+    action = EthProofsClient.Application.prover_action()
 
     Logger.info("Enqueued block #{block_number} for #{action} (input: #{input_path})")
 
@@ -181,7 +181,7 @@ defmodule EthProofsClient.Prover do
   defp maybe_start_next(%{status: :idle, queue: queue} = state) do
     case :queue.out(queue) do
       {{:value, {block_number, input_path}}, new_queue} ->
-        action = if EthProofsClient.Application.dev_mode?(), do: :execute, else: :prove
+        action = EthProofsClient.Application.prover_action()
         port = start_zisk(state.elf, block_number, input_path, action)
         Process.link(port)
 
@@ -207,7 +207,7 @@ defmodule EthProofsClient.Prover do
     end
   end
 
-  # Already proving, do nothing
+  # Already running, do nothing
   defp maybe_start_next(state), do: state
 
   defp start_zisk(elf, block_number, input_path, :prove) do

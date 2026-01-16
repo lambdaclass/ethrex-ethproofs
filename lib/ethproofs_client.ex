@@ -27,6 +27,13 @@ defmodule EthProofsClient.Application do
     Application.get_env(:ethproofs_client, :dev, false) == true
   end
 
+  @doc """
+  Returns the action to perform based on the application mode.
+  """
+  def prover_action do
+    if dev_mode?(), do: :execute, else: :prove
+  end
+
   alias EthProofsClient.HealthRouter
   alias EthProofsClient.InputGenerator
   alias EthProofsClient.Prover

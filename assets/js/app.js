@@ -45,6 +45,32 @@ Hooks.TimeAgo = {
   }
 }
 
+// Hook for displaying timestamps in local time
+Hooks.LocalTime = {
+  mounted() {
+    this.updateTime()
+  },
+  updated() {
+    this.updateTime()
+  },
+  updateTime() {
+    const timestamp = this.el.dataset.timestamp
+    if (timestamp) {
+      const date = new Date(timestamp)
+      const formatted = date.toLocaleString(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      })
+      this.el.innerText = formatted
+    }
+  }
+}
+
 // Hook for countdown timer
 Hooks.Countdown = {
   mounted() {

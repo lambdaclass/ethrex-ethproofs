@@ -20,6 +20,7 @@ defmodule EthProofsClient.Prover do
     :status,
     :elf,
     :proving_since,
+    :idle_since,
     :current_input_gen_duration,
     queue: :queue.new(),
     queued_blocks: MapSet.new()
@@ -53,7 +54,7 @@ defmodule EthProofsClient.Prover do
   @impl true
   def init(%{elf: elf}) do
     Process.flag(:trap_exit, true)
-    {:ok, %__MODULE__{status: :idle, elf: elf}}
+    {:ok, %__MODULE__{status: :idle, elf: elf, idle_since: DateTime.utc_now()}}
   end
 
   @impl true
@@ -63,7 +64,9 @@ defmodule EthProofsClient.Prover do
       queue_length: :queue.len(state.queue),
       queued_blocks: MapSet.to_list(state.queued_blocks),
       proving_since: state.proving_since,
-      proving_duration_seconds: proving_duration(state)
+      proving_duration_seconds: proving_duration(state),
+      idle_since: state.idle_since,
+      idle_duration_seconds: idle_duration(state)
     }
 
     {:reply, status_info, state}
@@ -121,7 +124,7 @@ defmodule EthProofsClient.Prover do
       reason: "Prover crashed: #{format_error(reason)}"
     })
 
-    new_state = %{state | status: :idle, proving_since: nil}
+    new_state = %{state | status: :idle, proving_since: nil, idle_since: DateTime.utc_now()}
     {:noreply, maybe_start_next(new_state)}
   end
 
@@ -193,6 +196,7 @@ defmodule EthProofsClient.Prover do
             queue: new_queue,
             queued_blocks: MapSet.delete(state.queued_blocks, block_number),
             proving_since: DateTime.utc_now(),
+            idle_since: nil,
             current_input_gen_duration: input_gen_duration
         }
 
@@ -262,7 +266,7 @@ defmodule EthProofsClient.Prover do
     # Broadcast status update
     broadcast_status_update(:idle)
 
-    %{state | status: :idle, proving_since: nil, current_input_gen_duration: nil}
+    %{state | status: :idle, proving_since: nil, idle_since: DateTime.utc_now(), current_input_gen_duration: nil}
   end
 
   defp read_proof_data(block_number) do
@@ -295,6 +299,12 @@ defmodule EthProofsClient.Prover do
   defp proving_duration(%{proving_since: nil}), do: nil
 
   defp proving_duration(%{proving_since: since}) do
+    DateTime.diff(DateTime.utc_now(), since, :second)
+  end
+
+  defp idle_duration(%{idle_since: nil}), do: nil
+
+  defp idle_duration(%{idle_since: since}) do
     DateTime.diff(DateTime.utc_now(), since, :second)
   end
 

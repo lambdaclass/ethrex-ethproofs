@@ -27,6 +27,7 @@ defmodule EthProofsClient.InputGenerator do
     :status,
     :last_block_info,
     :generating_since,
+    :idle_since,
     queue: :queue.new(),
     queued_blocks: MapSet.new(),
     processed_blocks: MapSet.new()
@@ -57,7 +58,7 @@ defmodule EthProofsClient.InputGenerator do
   @impl true
   def init(_state) do
     schedule_fetch()
-    {:ok, %__MODULE__{status: :idle}}
+    {:ok, %__MODULE__{status: :idle, idle_since: DateTime.utc_now()}}
   end
 
   @impl true
@@ -67,7 +68,10 @@ defmodule EthProofsClient.InputGenerator do
       queue_length: :queue.len(state.queue),
       queued_blocks: MapSet.to_list(state.queued_blocks),
       processed_count: MapSet.size(state.processed_blocks),
-      last_block_info: state.last_block_info
+      last_block_info: state.last_block_info,
+      generating_duration_seconds: generation_duration(state),
+      idle_since: state.idle_since,
+      idle_duration_seconds: idle_duration(state)
     }
 
     {:reply, status_info, state}
@@ -125,6 +129,7 @@ defmodule EthProofsClient.InputGenerator do
       state
       | status: :idle,
         generating_since: nil,
+        idle_since: DateTime.utc_now(),
         processed_blocks: MapSet.put(state.processed_blocks, block_number)
     }
 
@@ -148,7 +153,7 @@ defmodule EthProofsClient.InputGenerator do
     })
 
     # Don't mark as processed so it can be retried if requested again
-    new_state = %{state | status: :idle, generating_since: nil}
+    new_state = %{state | status: :idle, generating_since: nil, idle_since: DateTime.utc_now()}
 
     # Broadcast status update
     broadcast_generator_status(new_state)
@@ -232,7 +237,8 @@ defmodule EthProofsClient.InputGenerator do
           | status: {:generating, block_number, task.ref},
             queue: new_queue,
             queued_blocks: MapSet.delete(state.queued_blocks, block_number),
-            generating_since: DateTime.utc_now()
+            generating_since: DateTime.utc_now(),
+            idle_since: nil
         }
 
         # Broadcast status update
@@ -335,6 +341,12 @@ defmodule EthProofsClient.InputGenerator do
     DateTime.diff(DateTime.utc_now(), since, :second)
   end
 
+  defp idle_duration(%{idle_since: nil}), do: nil
+
+  defp idle_duration(%{idle_since: since}) do
+    DateTime.diff(DateTime.utc_now(), since, :second)
+  end
+
   defp broadcast_next_block(info) do
     Phoenix.PubSub.broadcast(
       EthProofsClient.PubSub,
@@ -351,7 +363,9 @@ defmodule EthProofsClient.InputGenerator do
       status: sanitize_status(state.status),
       queue_length: :queue.len(state.queue),
       processed_count: MapSet.size(state.processed_blocks),
-      last_block_info: state.last_block_info
+      last_block_info: state.last_block_info,
+      generating_duration_seconds: generation_duration(state),
+      idle_duration_seconds: idle_duration(state)
     }
 
     Phoenix.PubSub.broadcast(

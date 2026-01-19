@@ -73,6 +73,40 @@ defmodule EthProofsClientWeb.CoreComponents do
   defp stage_text(stage), do: to_string(stage)
 
   @doc """
+  Renders a block status badge indicating whether a block was proved or failed.
+  """
+  attr(:status, :atom, required: true)
+  attr(:stage, :atom, default: nil)
+  attr(:class, :string, default: nil)
+
+  def block_status_badge(assigns) do
+    ~H"""
+    <span class={[
+      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
+      block_status_badge_class(@status),
+      @class
+    ]}>
+      <span class={["w-2 h-2 rounded-full", block_status_dot_class(@status)]}></span>
+      {block_status_text(@status, @stage)}
+    </span>
+    """
+  end
+
+  defp block_status_badge_class(:proved), do: "bg-emerald-900/50 text-emerald-300"
+  defp block_status_badge_class(:failed), do: "bg-red-900/50 text-red-300"
+  defp block_status_badge_class(_), do: "bg-slate-700/50 text-slate-300"
+
+  defp block_status_dot_class(:proved), do: "bg-emerald-400"
+  defp block_status_dot_class(:failed), do: "bg-red-400"
+  defp block_status_dot_class(_), do: "bg-slate-400"
+
+  defp block_status_text(:proved, _stage), do: "Proved"
+  defp block_status_text(:failed, :input_generation), do: "Failed: Input Gen"
+  defp block_status_text(:failed, :proving), do: "Failed: Proving"
+  defp block_status_text(:failed, _stage), do: "Failed"
+  defp block_status_text(status, _stage), do: to_string(status)
+
+  @doc """
   Renders a metric card with a label and value.
   """
   attr(:label, :string, required: true)
@@ -177,7 +211,7 @@ defmodule EthProofsClientWeb.CoreComponents do
         </tbody>
       </table>
       <div :if={@rows == []} class="text-center py-12 text-slate-500">
-        No blocks proved yet
+        No blocks yet
       </div>
     </div>
     """

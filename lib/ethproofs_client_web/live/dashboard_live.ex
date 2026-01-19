@@ -37,6 +37,9 @@ defmodule EthProofsClientWeb.DashboardLive do
     proved_blocks = safe_call(ProvedBlocksStore, :list_blocks) || []
     missed_blocks = safe_call(MissedBlocksStore, :list_blocks) || []
 
+    # Merge proved and missed blocks into a single list for display
+    all_blocks = merge_blocks(proved_blocks, missed_blocks)
+
     # Extract next_block_info from generator_status and recalculate countdown
     next_block_info =
       case generator_status do
@@ -53,6 +56,7 @@ defmodule EthProofsClientWeb.DashboardLive do
     |> assign(:generator_status, generator_status)
     |> assign(:proved_blocks, proved_blocks)
     |> assign(:missed_blocks, missed_blocks)
+    |> assign(:all_blocks, all_blocks)
     |> assign(:next_block_info, next_block_info)
   end
 
@@ -64,6 +68,38 @@ defmodule EthProofsClientWeb.DashboardLive do
   end
 
   defp recalculate_countdown(info), do: info
+
+  # Merge proved and missed blocks into a unified list sorted by timestamp (newest first)
+  defp merge_blocks(proved_blocks, missed_blocks) do
+    proved =
+      Enum.map(proved_blocks, fn block ->
+        %{
+          block_number: block.block_number,
+          timestamp: block.proved_at,
+          status: :proved,
+          proving_duration_seconds: block.proving_duration_seconds,
+          input_generation_duration_seconds: block.input_generation_duration_seconds,
+          stage: nil,
+          reason: nil
+        }
+      end)
+
+    missed =
+      Enum.map(missed_blocks, fn block ->
+        %{
+          block_number: block.block_number,
+          timestamp: block.failed_at,
+          status: :failed,
+          proving_duration_seconds: nil,
+          input_generation_duration_seconds: nil,
+          stage: block.stage,
+          reason: block.reason
+        }
+      end)
+
+    (proved ++ missed)
+    |> Enum.sort_by(& &1.timestamp, {:desc, DateTime})
+  end
 
   defp safe_call(module, function, args \\ []) do
     apply(module, function, args)
@@ -170,17 +206,22 @@ defmodule EthProofsClientWeb.DashboardLive do
         />
       </section>
 
-      <%!-- Proved Blocks Table --%>
+      <%!-- Recent Blocks Table (merged proved and missed) --%>
       <section class="bg-slate-800/40 border border-slate-700/50 rounded-xl overflow-hidden">
         <div class="px-6 py-4 border-b border-slate-700/50">
-          <h3 class="text-lg font-semibold text-white">Recently Proved Blocks</h3>
+          <h3 class="text-lg font-semibold text-white">Recent Blocks</h3>
         </div>
-        <.blocks_table id="proved-blocks" rows={@proved_blocks}>
+        <.blocks_table id="all-blocks" rows={@all_blocks}>
           <:col :let={block} label="Block" class="text-white">
             <.etherscan_link block_number={block.block_number} />
           </:col>
-          <:col :let={block} label="Proved At" class="text-slate-300">
-            {format_datetime(block.proved_at)}
+          <:col :let={block} label="Time" class="text-slate-300">
+            <span phx-hook="LocalTime" id={"time-#{block.block_number}"} data-timestamp={DateTime.to_iso8601(block.timestamp)}>
+              {format_datetime(block.timestamp)}
+            </span>
+          </:col>
+          <:col :let={block} label="Status" class="text-slate-300">
+            <.block_status_badge status={block.status} stage={block.stage} />
           </:col>
           <:col :let={block} label="Proving Duration" class="text-slate-300">
             {format_duration_long(block.proving_duration_seconds)}
@@ -188,31 +229,15 @@ defmodule EthProofsClientWeb.DashboardLive do
           <:col :let={block} label="Input Gen Duration" class="text-slate-300">
             {format_duration_long(block.input_generation_duration_seconds)}
           </:col>
+          <:col :let={block} label="Details" class="text-slate-300">
+            <%= if block.reason do %>
+              <span class="text-red-300">{block.reason}</span>
+            <% else %>
+              -
+            <% end %>
+          </:col>
         </.blocks_table>
       </section>
-
-      <%!-- Missed Blocks Table --%>
-      <%= if @missed_blocks != [] do %>
-        <section class="bg-red-900/20 border border-red-700/50 rounded-xl overflow-hidden">
-          <div class="px-6 py-4 border-b border-red-700/50">
-            <h3 class="text-lg font-semibold text-red-300">Missed Blocks</h3>
-          </div>
-          <.blocks_table id="missed-blocks" rows={@missed_blocks}>
-            <:col :let={block} label="Block" class="text-white">
-              <.etherscan_link block_number={block.block_number} />
-            </:col>
-            <:col :let={block} label="Failed At" class="text-slate-300">
-              {format_datetime(block.failed_at)}
-            </:col>
-            <:col :let={block} label="Stage" class="text-slate-300">
-              <.stage_badge stage={block.stage} />
-            </:col>
-            <:col :let={block} label="Reason" class="text-red-300">
-              {block.reason}
-            </:col>
-          </.blocks_table>
-        </section>
-      <% end %>
     </div>
     """
   end
@@ -243,14 +268,16 @@ defmodule EthProofsClientWeb.DashboardLive do
     %{
       "Current Block" => block_number,
       "Queue Length" => Map.get(status, :queue_length, 0),
-      "Processed" => Map.get(status, :processed_count, 0)
+      "Processed" => Map.get(status, :processed_count, 0),
+      "Duration" => format_duration_long(Map.get(status, :generating_duration_seconds))
     }
   end
 
   defp generator_details(status) do
     %{
       "Queue Length" => Map.get(status, :queue_length, 0),
-      "Processed" => Map.get(status, :processed_count, 0)
+      "Processed" => Map.get(status, :processed_count, 0),
+      "Duration" => format_duration_long(Map.get(status, :idle_duration_seconds))
     }
   end
 
@@ -266,7 +293,8 @@ defmodule EthProofsClientWeb.DashboardLive do
 
   defp prover_details(status) do
     %{
-      "Queue Length" => Map.get(status, :queue_length, 0)
+      "Queue Length" => Map.get(status, :queue_length, 0),
+      "Duration" => format_duration_long(Map.get(status, :idle_duration_seconds))
     }
   end
 

@@ -150,7 +150,7 @@ defmodule EthProofsClientWeb.DashboardLive do
       </section>
 
       <%!-- Metrics Row --%>
-      <section class="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <section class="grid grid-cols-2 md:grid-cols-6 gap-4">
         <.metric_card label="Blocks Proved" value={length(@proved_blocks)}>
           <:icon>
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -187,6 +187,14 @@ defmodule EthProofsClientWeb.DashboardLive do
           <:icon>
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </:icon>
+        </.metric_card>
+
+        <.metric_card label="Last Sent Proof" value={format_last_proof_ago(@proved_blocks)}>
+          <:icon>
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
           </:icon>
         </.metric_card>
@@ -311,6 +319,32 @@ defmodule EthProofsClientWeb.DashboardLive do
       list -> format_duration_long(div(Enum.sum(list), length(list)))
     end
   end
+
+  defp format_last_proof_ago([]), do: "-"
+
+  defp format_last_proof_ago([most_recent | _]) do
+    case most_recent.proved_at do
+      %DateTime{} = proved_at ->
+        now = DateTime.utc_now()
+        elapsed_seconds = DateTime.diff(now, proved_at, :second)
+        format_elapsed_ago(elapsed_seconds)
+
+      _ ->
+        "-"
+    end
+  end
+
+  defp format_elapsed_ago(seconds) when is_integer(seconds) and seconds >= 0 do
+    minutes = div(seconds, 60)
+    secs = rem(seconds, 60)
+
+    formatted =
+      "#{String.pad_leading(Integer.to_string(minutes), 2, "0")}:#{String.pad_leading(Integer.to_string(secs), 2, "0")}"
+
+    "#{formatted} ago"
+  end
+
+  defp format_elapsed_ago(_), do: "-"
 
   defp format_datetime(nil), do: "-"
 

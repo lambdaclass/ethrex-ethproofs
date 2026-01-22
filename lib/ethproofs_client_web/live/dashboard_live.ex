@@ -36,6 +36,8 @@ defmodule EthProofsClientWeb.DashboardLive do
     generator_status = safe_call(InputGenerator, :status)
     proved_blocks = safe_call(ProvedBlocksStore, :list_blocks) || []
     missed_blocks = safe_call(MissedBlocksStore, :list_blocks) || []
+    proved_count = safe_call(ProvedBlocksStore, :count) || 0
+    missed_count = safe_call(MissedBlocksStore, :count) || 0
 
     # Merge proved and missed blocks into a single list for display
     all_blocks = merge_blocks(proved_blocks, missed_blocks)
@@ -54,14 +56,20 @@ defmodule EthProofsClientWeb.DashboardLive do
     # Calculate time since last proof for live counter
     last_proof_ago = calculate_last_proof_ago(proved_blocks)
 
+    # Calculate uptime
+    uptime = calculate_uptime()
+
     socket
     |> assign(:prover_status, prover_status)
     |> assign(:generator_status, generator_status)
     |> assign(:proved_blocks, proved_blocks)
     |> assign(:missed_blocks, missed_blocks)
+    |> assign(:proved_count, proved_count)
+    |> assign(:missed_count, missed_count)
     |> assign(:all_blocks, all_blocks)
     |> assign(:next_block_info, next_block_info)
     |> assign(:last_proof_ago, last_proof_ago)
+    |> assign(:uptime, uptime)
   end
 
   # Recalculate the countdown based on current time
@@ -120,7 +128,10 @@ defmodule EthProofsClientWeb.DashboardLive do
       <%!-- Header with current block info --%>
       <section class="text-center py-8">
         <h2 class="text-3xl font-bold text-white mb-2">Proof Generation Status</h2>
-        <p class="text-slate-400 mb-6">Real-time monitoring of Ethereum block proof generation</p>
+        <p class="text-slate-400 mb-1">Real-time monitoring of Ethereum block proof generation</p>
+        <p class="text-slate-500 text-sm mb-6 font-mono tabular-nums">
+          Uptime: {format_uptime(@uptime)}
+        </p>
 
         <%= if @next_block_info do %>
           <div class="inline-flex items-center gap-8 bg-slate-800/60 border border-slate-700/50 rounded-xl px-8 py-4">
@@ -155,7 +166,7 @@ defmodule EthProofsClientWeb.DashboardLive do
 
       <%!-- Metrics Row --%>
       <section class="grid grid-cols-2 md:grid-cols-6 gap-4">
-        <.metric_card label="Blocks Proved" value={length(@proved_blocks)}>
+        <.metric_card label="Blocks Proved" value={@proved_count}>
           <:icon>
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -163,7 +174,7 @@ defmodule EthProofsClientWeb.DashboardLive do
           </:icon>
         </.metric_card>
 
-        <.metric_card label="Blocks Missed" value={length(@missed_blocks)}>
+        <.metric_card label="Blocks Missed" value={@missed_count}>
           <:icon>
             <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -378,4 +389,35 @@ defmodule EthProofsClientWeb.DashboardLive do
   end
 
   defp format_countdown(_), do: "--:--"
+
+  defp calculate_uptime do
+    case EthProofsClient.Application.started_at() do
+      %DateTime{} = started_at ->
+        now = DateTime.utc_now()
+        DateTime.diff(now, started_at, :second)
+
+      _ ->
+        0
+    end
+  end
+
+  defp format_uptime(seconds) when is_integer(seconds) and seconds >= 0 do
+    days = div(seconds, 86400)
+    hours = div(rem(seconds, 86400), 3600)
+    minutes = div(rem(seconds, 3600), 60)
+    secs = rem(seconds, 60)
+
+    cond do
+      days > 0 ->
+        "#{days}d #{hours}h #{minutes}m"
+
+      hours > 0 ->
+        "#{hours}h #{minutes}m #{secs}s"
+
+      true ->
+        "#{String.pad_leading(Integer.to_string(minutes), 2, "0")}:#{String.pad_leading(Integer.to_string(secs), 2, "0")}"
+    end
+  end
+
+  defp format_uptime(_), do: "-"
 end

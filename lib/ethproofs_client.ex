@@ -28,6 +28,9 @@ defmodule EthProofsClient.Application do
   alias EthProofsClient.Prover
 
   def start(_type, _args) do
+    # Record application start time for uptime tracking
+    :persistent_term.put(:ethproofs_client_started_at, DateTime.utc_now())
+
     elf_path =
       Application.get_env(:ethproofs_client, :elf_path) ||
         raise "ELF_PATH environment variable must be set"
@@ -60,5 +63,12 @@ defmodule EthProofsClient.Application do
   def config_change(changed, _new, removed) do
     EthProofsClientWeb.Endpoint.config_change(changed, removed)
     :ok
+  end
+
+  @doc """
+  Returns the DateTime when the application started.
+  """
+  def started_at do
+    :persistent_term.get(:ethproofs_client_started_at, nil)
   end
 end

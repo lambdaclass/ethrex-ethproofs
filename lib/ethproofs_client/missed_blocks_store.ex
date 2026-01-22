@@ -28,7 +28,7 @@ defmodule EthProofsClient.MissedBlocksStore do
   @max_blocks 100
   @pubsub_topic "missed_blocks"
 
-  defstruct blocks: [], block_set: MapSet.new()
+  defstruct blocks: [], block_set: MapSet.new(), total_count: 0
 
   # --- Public API ---
 
@@ -109,7 +109,7 @@ defmodule EthProofsClient.MissedBlocksStore do
           new_block_set
         end
 
-      new_state = %{state | blocks: new_blocks, block_set: new_block_set}
+      new_state = %{state | blocks: new_blocks, block_set: new_block_set, total_count: state.total_count + 1}
 
       # Broadcast the update
       broadcast_update(new_state)
@@ -126,7 +126,7 @@ defmodule EthProofsClient.MissedBlocksStore do
 
   @impl true
   def handle_call(:count, _from, state) do
-    {:reply, length(state.blocks), state}
+    {:reply, state.total_count, state}
   end
 
   @impl true

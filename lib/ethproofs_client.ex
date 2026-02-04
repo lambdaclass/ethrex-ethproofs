@@ -69,6 +69,15 @@ defmodule EthProofsClient.Application do
   Returns the DateTime when the application started.
   """
   def started_at do
-    :persistent_term.get(:ethproofs_client_started_at, nil)
+    case :persistent_term.get(:ethproofs_client_started_at, nil) do
+      nil ->
+        # Initialize if not set (can happen after code reload or unusual startup)
+        now = DateTime.utc_now()
+        :persistent_term.put(:ethproofs_client_started_at, now)
+        now
+
+      datetime ->
+        datetime
+    end
   end
 end

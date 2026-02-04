@@ -53,7 +53,7 @@ defmodule EthProofsClient.ProverTest do
         |> enqueue_block(100)
 
       {:noreply, new_state} =
-        Prover.handle_cast({:prove, 100, "/path/to/100.bin"}, state)
+        Prover.handle_cast({:prove, 100, "/path/to/100.bin", nil}, state)
 
       # Queue length should remain 1 (not added again)
       assert :queue.len(new_state.queue) == 1
@@ -64,7 +64,7 @@ defmodule EthProofsClient.ProverTest do
       state = new_state() |> set_proving(100)
 
       {:noreply, new_state} =
-        Prover.handle_cast({:prove, 100, "/path/to/100.bin"}, state)
+        Prover.handle_cast({:prove, 100, "/path/to/100.bin", nil}, state)
 
       # Queue should remain empty
       assert :queue.is_empty(new_state.queue)
@@ -180,9 +180,9 @@ defmodule EthProofsClient.ProverTest do
         |> enqueue_block(200)
         |> enqueue_block(300)
 
-      {{:value, {first, _}}, rest} = :queue.out(state.queue)
-      {{:value, {second, _}}, rest} = :queue.out(rest)
-      {{:value, {third, _}}, _} = :queue.out(rest)
+      {{:value, {first, _, _}}, rest} = :queue.out(state.queue)
+      {{:value, {second, _, _}}, rest} = :queue.out(rest)
+      {{:value, {third, _, _}}, _} = :queue.out(rest)
 
       assert first == 100
       assert second == 200
@@ -198,7 +198,8 @@ defmodule EthProofsClient.ProverTest do
       elf: "/test/elf",
       queue: :queue.new(),
       queued_blocks: MapSet.new(),
-      proving_since: nil
+      proving_since: nil,
+      current_input_gen_duration: nil
     }
   end
 
@@ -214,7 +215,7 @@ defmodule EthProofsClient.ProverTest do
   defp enqueue_block(state, block_number) do
     %{
       state
-      | queue: :queue.in({block_number, "/path/to/#{block_number}.bin"}, state.queue),
+      | queue: :queue.in({block_number, "/path/to/#{block_number}.bin", nil}, state.queue),
         queued_blocks: MapSet.put(state.queued_blocks, block_number)
     }
   end

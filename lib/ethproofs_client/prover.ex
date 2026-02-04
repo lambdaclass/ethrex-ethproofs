@@ -12,12 +12,16 @@ defmodule EthProofsClient.Prover do
   use GenServer
   require Logger
 
+  alias EthProofsClient.MissedBlocksStore
+
   @output_dir "output"
 
   defstruct [
     :status,
     :elf,
     :proving_since,
+    :idle_since,
+    :current_input_gen_duration,
     queue: :queue.new(),
     queued_blocks: MapSet.new()
   ]
@@ -30,9 +34,12 @@ defmodule EthProofsClient.Prover do
 
   @doc """
   Enqueue a block for proving. Duplicates are automatically ignored.
+
+  The optional `input_gen_duration` parameter tracks how long input generation took,
+  so it can be displayed in the dashboard.
   """
-  def prove(block_number, input_path) do
-    GenServer.cast(__MODULE__, {:prove, block_number, input_path})
+  def prove(block_number, input_path, input_gen_duration \\ nil) do
+    GenServer.cast(__MODULE__, {:prove, block_number, input_path, input_gen_duration})
   end
 
   @doc """
@@ -47,7 +54,7 @@ defmodule EthProofsClient.Prover do
   @impl true
   def init(%{elf: elf}) do
     Process.flag(:trap_exit, true)
-    {:ok, %__MODULE__{status: :idle, elf: elf}}
+    {:ok, %__MODULE__{status: :idle, elf: elf, idle_since: DateTime.utc_now()}}
   end
 
   @impl true
@@ -57,14 +64,16 @@ defmodule EthProofsClient.Prover do
       queue_length: :queue.len(state.queue),
       queued_blocks: MapSet.to_list(state.queued_blocks),
       proving_since: state.proving_since,
-      proving_duration_seconds: proving_duration(state)
+      proving_duration_seconds: proving_duration(state),
+      idle_since: state.idle_since,
+      idle_duration_seconds: idle_duration(state)
     }
 
     {:reply, status_info, state}
   end
 
   @impl true
-  def handle_cast({:prove, block_number, input_path}, state) do
+  def handle_cast({:prove, block_number, input_path, input_gen_duration}, state) do
     cond do
       MapSet.member?(state.queued_blocks, block_number) ->
         Logger.debug("Block #{block_number} already queued, skipping")
@@ -76,7 +85,7 @@ defmodule EthProofsClient.Prover do
 
       true ->
         report_queued(block_number)
-        new_state = enqueue(state, block_number, input_path)
+        new_state = enqueue(state, block_number, input_path, input_gen_duration)
         {:noreply, maybe_start_next(new_state)}
     end
   end
@@ -110,7 +119,12 @@ defmodule EthProofsClient.Prover do
       "Port died unexpectedly for block #{block_number}: #{inspect(reason)}. Continuing with next item."
     )
 
-    new_state = %{state | status: :idle, proving_since: nil}
+    MissedBlocksStore.add_block(block_number, %{
+      stage: :proving,
+      reason: "Prover crashed: #{format_error(reason)}"
+    })
+
+    new_state = %{state | status: :idle, proving_since: nil, idle_since: DateTime.utc_now()}
     {:noreply, maybe_start_next(new_state)}
   end
 
@@ -133,24 +147,38 @@ defmodule EthProofsClient.Prover do
     {:noreply, state}
   end
 
+  # Handle EXIT from PIDs (processes spawned by the port or linked processes)
+  @impl true
+  def handle_info({:EXIT, pid, reason}, state) when is_pid(pid) do
+    Logger.debug("Ignoring EXIT from process #{inspect(pid)}: #{inspect(reason)}")
+    {:noreply, state}
+  end
+
+  # Catch-all for any unexpected messages
+  @impl true
+  def handle_info(msg, state) do
+    Logger.warning("Prover received unexpected message: #{inspect(msg)}")
+    {:noreply, state}
+  end
+
   # --- Private Functions ---
 
   defp currently_proving?(%{status: {:proving, block_number, _port}}, block_number), do: true
   defp currently_proving?(_state, _block_number), do: false
 
-  defp enqueue(state, block_number, input_path) do
+  defp enqueue(state, block_number, input_path, input_gen_duration) do
     Logger.info("Enqueued block #{block_number} for proving (input: #{input_path})")
 
     %{
       state
-      | queue: :queue.in({block_number, input_path}, state.queue),
+      | queue: :queue.in({block_number, input_path, input_gen_duration}, state.queue),
         queued_blocks: MapSet.put(state.queued_blocks, block_number)
     }
   end
 
   defp maybe_start_next(%{status: :idle, queue: queue} = state) do
     case :queue.out(queue) do
-      {{:value, {block_number, input_path}}, new_queue} ->
+      {{:value, {block_number, input_path, input_gen_duration}}, new_queue} ->
         port = start_prover(state.elf, block_number, input_path)
         Process.link(port)
         report_proving(block_number)
@@ -159,12 +187,17 @@ defmodule EthProofsClient.Prover do
           "Started cargo-zisk prover for block #{block_number} (ELF: #{state.elf}, INPUT: #{input_path}, PORT: #{inspect(port)})"
         )
 
+        # Broadcast status update
+        broadcast_status_update({:proving, block_number})
+
         %{
           state
           | status: {:proving, block_number, port},
             queue: new_queue,
             queued_blocks: MapSet.delete(state.queued_blocks, block_number),
-            proving_since: DateTime.utc_now()
+            proving_since: DateTime.utc_now(),
+            idle_since: nil,
+            current_input_gen_duration: input_gen_duration
         }
 
       {:empty, _queue} ->
@@ -201,6 +234,9 @@ defmodule EthProofsClient.Prover do
   end
 
   defp handle_proof_completion(state, block_number, exit_status) do
+    proving_duration = proving_duration(state)
+    input_gen_duration = state.current_input_gen_duration
+
     case read_proof_data(block_number) do
       {:ok, proof_data} ->
         Logger.info(
@@ -209,13 +245,28 @@ defmodule EthProofsClient.Prover do
 
         report_proved(block_number, proof_data)
 
+        # Store in ProvedBlocksStore for dashboard
+        EthProofsClient.ProvedBlocksStore.add_block(block_number, %{
+          proved_at: DateTime.utc_now(),
+          proving_duration_seconds: proving_duration,
+          input_generation_duration_seconds: input_gen_duration
+        })
+
       {:error, reason} ->
         Logger.error(
           "Failed to read proof data for block #{block_number} (exit_status: #{exit_status}): #{inspect(reason)}"
         )
+
+        MissedBlocksStore.add_block(block_number, %{
+          stage: :proving,
+          reason: "Proving failed (exit_status: #{exit_status}): #{format_error(reason)}"
+        })
     end
 
-    %{state | status: :idle, proving_since: nil}
+    # Broadcast status update
+    broadcast_status_update(:idle)
+
+    %{state | status: :idle, proving_since: nil, idle_since: DateTime.utc_now(), current_input_gen_duration: nil}
   end
 
   defp read_proof_data(block_number) do
@@ -242,9 +293,18 @@ defmodule EthProofsClient.Prover do
   defp sanitize_status(:idle), do: :idle
   defp sanitize_status({:proving, block_number, _port}), do: {:proving, block_number}
 
+  defp format_error(reason) when is_binary(reason), do: reason
+  defp format_error(reason), do: inspect(reason)
+
   defp proving_duration(%{proving_since: nil}), do: nil
 
   defp proving_duration(%{proving_since: since}) do
+    DateTime.diff(DateTime.utc_now(), since, :second)
+  end
+
+  defp idle_duration(%{idle_since: nil}), do: nil
+
+  defp idle_duration(%{idle_since: since}) do
     DateTime.diff(DateTime.utc_now(), since, :second)
   end
 
@@ -284,5 +344,16 @@ defmodule EthProofsClient.Prover do
       {:error, reason} ->
         Logger.error("Failed to report proved status for block #{block_number}: #{reason}")
     end
+  end
+
+  defp broadcast_status_update(status) do
+    Phoenix.PubSub.broadcast(
+      EthProofsClient.PubSub,
+      "prover_status",
+      {:prover_status, status}
+    )
+  rescue
+    # PubSub might not be started during tests
+    ArgumentError -> :ok
   end
 end

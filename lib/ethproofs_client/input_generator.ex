@@ -18,12 +18,16 @@ defmodule EthProofsClient.InputGenerator do
   use GenServer
   require Logger
 
+  alias EthProofsClient.MissedBlocksStore
   alias EthProofsClient.Prover
 
   @block_fetch_interval 2_000
 
   defstruct [
     :status,
+    :last_block_info,
+    :generating_since,
+    :idle_since,
     queue: :queue.new(),
     queued_blocks: MapSet.new(),
     processed_blocks: MapSet.new()
@@ -54,7 +58,7 @@ defmodule EthProofsClient.InputGenerator do
   @impl true
   def init(_state) do
     schedule_fetch()
-    {:ok, %__MODULE__{status: :idle}}
+    {:ok, %__MODULE__{status: :idle, idle_since: DateTime.utc_now()}}
   end
 
   @impl true
@@ -63,7 +67,11 @@ defmodule EthProofsClient.InputGenerator do
       status: sanitize_status(state.status),
       queue_length: :queue.len(state.queue),
       queued_blocks: MapSet.to_list(state.queued_blocks),
-      processed_count: MapSet.size(state.processed_blocks)
+      processed_count: MapSet.size(state.processed_blocks),
+      last_block_info: state.last_block_info,
+      generating_duration_seconds: generation_duration(state),
+      idle_since: state.idle_since,
+      idle_duration_seconds: idle_duration(state)
     }
 
     {:reply, status_info, state}
@@ -97,20 +105,36 @@ defmodule EthProofsClient.InputGenerator do
     # Flush the :DOWN message since we handled completion
     Process.demonitor(ref, [:flush])
 
+    # Calculate generation duration
+    generation_duration = generation_duration(state)
+
     case result do
       {:ok, input_path} ->
-        Logger.info("Generated input for block #{block_number}: #{input_path}")
-        Prover.prove(block_number, input_path)
+        Logger.info(
+          "Generated input for block #{block_number} in #{generation_duration}s: #{input_path}"
+        )
+
+        Prover.prove(block_number, input_path, generation_duration)
 
       {:error, reason} ->
         Logger.error("Failed to generate input for block #{block_number}: #{inspect(reason)}")
+
+        MissedBlocksStore.add_block(block_number, %{
+          stage: :input_generation,
+          reason: format_error(reason)
+        })
     end
 
     new_state = %{
       state
       | status: :idle,
+        generating_since: nil,
+        idle_since: DateTime.utc_now(),
         processed_blocks: MapSet.put(state.processed_blocks, block_number)
     }
+
+    # Broadcast status update before potentially starting next
+    broadcast_generator_status(new_state)
 
     {:noreply, maybe_start_next(new_state)}
   end
@@ -123,24 +147,35 @@ defmodule EthProofsClient.InputGenerator do
       ) do
     Logger.error("Generation task crashed for block #{block_number}: #{inspect(reason)}")
 
+    MissedBlocksStore.add_block(block_number, %{
+      stage: :input_generation,
+      reason: "Task crashed: #{format_error(reason)}"
+    })
+
     # Don't mark as processed so it can be retried if requested again
-    new_state = %{state | status: :idle}
+    new_state = %{state | status: :idle, generating_since: nil, idle_since: DateTime.utc_now()}
+
+    # Broadcast status update
+    broadcast_generator_status(new_state)
+
     {:noreply, maybe_start_next(new_state)}
   end
 
   # Periodic block fetching
   @impl true
   def handle_info(:fetch_latest_block_number, state) do
-    case EthProofsClient.EthRpc.get_latest_block_info() do
-      {:ok, {block_number, block_timestamp}} ->
-        handle_new_block(block_number, block_timestamp, state)
+    new_state =
+      case EthProofsClient.EthRpc.get_latest_block_info() do
+        {:ok, {block_number, block_timestamp}} ->
+          handle_new_block(block_number, block_timestamp, state)
 
-      {:error, reason} ->
-        Logger.error("Failed to fetch latest block: #{inspect(reason)}")
-    end
+        {:error, reason} ->
+          Logger.error("Failed to fetch latest block: #{inspect(reason)}")
+          state
+      end
 
     schedule_fetch()
-    {:noreply, state}
+    {:noreply, new_state}
   end
 
   # Ignore messages from unknown/old task refs
@@ -158,6 +193,13 @@ defmodule EthProofsClient.InputGenerator do
     {:noreply, state}
   end
 
+  # Catch-all for any unexpected messages
+  @impl true
+  def handle_info(msg, state) do
+    Logger.warning("InputGenerator received unexpected message: #{inspect(msg)}")
+    {:noreply, state}
+  end
+
   # --- Private Functions ---
 
   defp currently_generating?(%{status: {:generating, block_number, _ref}}, block_number), do: true
@@ -166,11 +208,15 @@ defmodule EthProofsClient.InputGenerator do
   defp enqueue(state, block_number) do
     Logger.info("Enqueued block #{block_number} for input generation")
 
-    %{
+    new_state = %{
       state
       | queue: :queue.in(block_number, state.queue),
         queued_blocks: MapSet.put(state.queued_blocks, block_number)
     }
+
+    # Broadcast queue update
+    broadcast_generator_status(new_state)
+    new_state
   end
 
   defp maybe_start_next(%{status: :idle, queue: queue} = state) do
@@ -186,12 +232,18 @@ defmodule EthProofsClient.InputGenerator do
             fn -> do_generate_input(block_number) end
           )
 
-        %{
+        new_state = %{
           state
           | status: {:generating, block_number, task.ref},
             queue: new_queue,
-            queued_blocks: MapSet.delete(state.queued_blocks, block_number)
+            queued_blocks: MapSet.delete(state.queued_blocks, block_number),
+            generating_since: DateTime.utc_now(),
+            idle_since: nil
         }
+
+        # Broadcast status update
+        broadcast_generator_status(new_state)
+        new_state
 
       {:empty, _queue} ->
         Logger.debug("Generation queue is empty, generator is idle")
@@ -216,33 +268,59 @@ defmodule EthProofsClient.InputGenerator do
   end
 
   defp handle_new_block(block_number, block_timestamp, state) do
+    # Always compute and store block info for the dashboard
+    blocks_remaining = 100 - rem(block_number, 100)
+    blocks_remaining = if blocks_remaining == 100, do: 0, else: blocks_remaining
+    next_multiple = block_number + blocks_remaining
+
+    # Store timestamp and blocks_remaining so dashboard can recalculate countdown
+    block_info = %{
+      current_block: block_number,
+      next_target_block: next_multiple,
+      blocks_remaining: blocks_remaining,
+      block_timestamp: block_timestamp
+    }
+
+    # Broadcast for live updates
+    broadcast_next_block(block_info)
+
+    # Update state with last block info
+    state = %{state | last_block_info: block_info}
+
+    # Broadcast generator status with updated block info
+    broadcast_generator_status(state)
+
     cond do
       rem(block_number, 100) != 0 ->
-        blocks_remaining = 100 - rem(block_number, 100)
-        next_multiple = block_number + blocks_remaining
-        # Account for time elapsed since block was produced
         elapsed = System.system_time(:second) - block_timestamp
-        estimated_wait = max(0, blocks_remaining * 12 - elapsed)
+        est_wait = max(0, blocks_remaining * 12 - elapsed)
 
         Logger.debug(
-          "Latest block: #{block_number}. Next multiple of 100: #{next_multiple} (est. #{estimated_wait}s)"
+          "Latest block: #{block_number}. Next multiple of 100: #{next_multiple} (est. #{est_wait}s)"
         )
+
+        state
 
       MapSet.member?(state.processed_blocks, block_number) ->
         Logger.debug("Block #{block_number} already processed, skipping")
+        state
 
       MapSet.member?(state.queued_blocks, block_number) ->
         Logger.debug("Block #{block_number} already queued, skipping")
+        state
 
       currently_generating?(state, block_number) ->
         Logger.debug("Block #{block_number} already generating, skipping")
+        state
 
       File.exists?(Integer.to_string(block_number) <> ".bin") ->
         Logger.debug("Block #{block_number} input file exists, skipping")
+        state
 
       true ->
         Logger.info("Block #{block_number} is a multiple of 100, queueing for generation")
         GenServer.cast(__MODULE__, {:generate, block_number})
+        state
     end
   end
 
@@ -252,6 +330,53 @@ defmodule EthProofsClient.InputGenerator do
 
   defp sanitize_status(:idle), do: :idle
   defp sanitize_status({:generating, block_number, _ref}), do: {:generating, block_number}
+
+  defp format_error(:timeout), do: "Request timeout"
+  defp format_error(reason) when is_binary(reason), do: reason
+  defp format_error(reason), do: inspect(reason)
+
+  defp generation_duration(%{generating_since: nil}), do: nil
+
+  defp generation_duration(%{generating_since: since}) do
+    DateTime.diff(DateTime.utc_now(), since, :second)
+  end
+
+  defp idle_duration(%{idle_since: nil}), do: nil
+
+  defp idle_duration(%{idle_since: since}) do
+    DateTime.diff(DateTime.utc_now(), since, :second)
+  end
+
+  defp broadcast_next_block(info) do
+    Phoenix.PubSub.broadcast(
+      EthProofsClient.PubSub,
+      "next_block",
+      {:next_block, info}
+    )
+  rescue
+    # PubSub might not be started during tests
+    ArgumentError -> :ok
+  end
+
+  defp broadcast_generator_status(state) do
+    status_info = %{
+      status: sanitize_status(state.status),
+      queue_length: :queue.len(state.queue),
+      processed_count: MapSet.size(state.processed_blocks),
+      last_block_info: state.last_block_info,
+      generating_duration_seconds: generation_duration(state),
+      idle_duration_seconds: idle_duration(state)
+    }
+
+    Phoenix.PubSub.broadcast(
+      EthProofsClient.PubSub,
+      "generator_status",
+      {:generator_status, status_info}
+    )
+  rescue
+    # PubSub might not be started during tests
+    ArgumentError -> :ok
+  end
 
   # NIF stub - replaced at runtime by Rustler
   defp generate_input(_rpc_block_bytes, _rpc_execution_witness_bytes),

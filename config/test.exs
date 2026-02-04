@@ -8,6 +8,11 @@ config :ethproofs_client,
   ethproofs_api_key: nil,
   ethproofs_cluster_id: nil
 
+# Test database - use file-based SQLite for tests
+config :ethproofs_client, EthProofsClient.Repo,
+  database: Path.expand("../ethproofs_client_test.db", __DIR__),
+  pool_size: 5
+
 # Phoenix test configuration
 config :ethproofs_client, EthProofsClientWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],

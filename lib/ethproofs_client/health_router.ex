@@ -181,7 +181,7 @@ defmodule EthProofsClient.HealthRouter do
   end
 
   defp format_state(:idle), do: "idle"
-  defp format_state({:running, block_number}), do: "running_#{block_number}"
+  defp format_state({:proving, block_number}), do: "proving_#{block_number}"
   defp format_state({:generating, block_number}), do: "generating_#{block_number}"
   defp format_state(other), do: inspect(other)
 

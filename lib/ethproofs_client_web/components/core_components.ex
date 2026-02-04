@@ -218,15 +218,15 @@ defmodule EthProofsClientWeb.CoreComponents do
   end
 
   @doc """
-  Renders an Etherscan link for a block number.
+  Renders an EthProofs link for a block number.
   """
   attr(:block_number, :integer, required: true)
   attr(:class, :string, default: nil)
 
-  def etherscan_link(assigns) do
+  def ethproofs_link(assigns) do
     ~H"""
     <a
-      href={"https://etherscan.io/block/#{@block_number}"}
+      href={"https://ethproofs.org/blocks/#{@block_number}"}
       target="_blank"
       rel="noopener noreferrer"
       class={[
@@ -240,6 +240,59 @@ defmodule EthProofsClientWeb.CoreComponents do
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
       </svg>
     </a>
+    """
+  end
+
+  @doc """
+  Renders a hardware info card displaying system specifications.
+  """
+  attr(:hardware_info, :map, required: true)
+  attr(:class, :string, default: nil)
+
+  def hardware_info_card(assigns) do
+    ~H"""
+    <div class={[
+      "bg-slate-800/60 border border-slate-700/50 rounded-xl p-5",
+      @class
+    ]}>
+      <div class="flex items-center gap-3 mb-4">
+        <div class="text-cyan-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+          </svg>
+        </div>
+        <h3 class="text-lg font-semibold text-white">Hardware</h3>
+        <a
+          href="https://ethproofs.org/clusters"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="ml-auto text-xs text-cyan-400 hover:text-cyan-300 hover:underline inline-flex items-center gap-1"
+        >
+          View cluster
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+        </a>
+      </div>
+      <div class="space-y-2 text-sm">
+        <div class="flex justify-between">
+          <span class="text-slate-400">CPU</span>
+          <span class="text-slate-200 font-medium">{@hardware_info.cpu}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">Cores</span>
+          <span class="text-slate-200 font-medium">{@hardware_info.cores}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">Memory</span>
+          <span class="text-slate-200 font-medium">{@hardware_info.memory}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-slate-400">OS</span>
+          <span class="text-slate-200 font-medium">{@hardware_info.os}</span>
+        </div>
+      </div>
+    </div>
     """
   end
 

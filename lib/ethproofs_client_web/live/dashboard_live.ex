@@ -16,7 +16,14 @@ defmodule EthProofsClientWeb.DashboardLive do
       Process.send_after(self(), :tick, 0)
     end
 
-    {:ok, socket |> assign(:page_title, "Dashboard") |> fetch_all_data()}
+    # Hardware info is static, fetch once on mount
+    hardware_info = fetch_hardware_info()
+
+    {:ok,
+     socket
+     |> assign(:page_title, "Dashboard")
+     |> assign(:hardware_info, hardware_info)
+     |> fetch_all_data()}
   end
 
   @impl true
@@ -216,7 +223,7 @@ defmodule EthProofsClientWeb.DashboardLive do
       </section>
 
       <%!-- Component Status Cards --%>
-      <section class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <section class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <.component_card
           name="Input Generator"
           status={get_generator_status_atom(@generator_status)}
@@ -227,6 +234,7 @@ defmodule EthProofsClientWeb.DashboardLive do
           status={get_prover_status_atom(@prover_status)}
           details={prover_details(@prover_status)}
         />
+        <.hardware_info_card hardware_info={@hardware_info} />
       </section>
 
       <%!-- Recent Blocks Table (merged proved and missed) --%>
@@ -236,7 +244,7 @@ defmodule EthProofsClientWeb.DashboardLive do
         </div>
         <.blocks_table id="all-blocks" rows={@all_blocks}>
           <:col :let={block} label="Block" class="text-white">
-            <.etherscan_link block_number={block.block_number} />
+            <.ethproofs_link block_number={block.block_number} />
           </:col>
           <:col :let={block} label="Time" class="text-slate-300">
             <span phx-hook="LocalTime" id={"time-#{block.block_number}"} data-timestamp={DateTime.to_iso8601(block.timestamp)}>
@@ -402,8 +410,8 @@ defmodule EthProofsClientWeb.DashboardLive do
   end
 
   defp format_uptime(seconds) when is_integer(seconds) and seconds >= 0 do
-    days = div(seconds, 86400)
-    hours = div(rem(seconds, 86400), 3600)
+    days = div(seconds, 86_400)
+    hours = div(rem(seconds, 86_400), 3600)
     minutes = div(rem(seconds, 3600), 60)
     secs = rem(seconds, 60)
 
@@ -420,4 +428,85 @@ defmodule EthProofsClientWeb.DashboardLive do
   end
 
   defp format_uptime(_), do: "-"
+
+  defp fetch_hardware_info do
+    cores = :erlang.system_info(:logical_processors_available)
+
+    memory = format_memory(get_total_memory())
+
+    cpu = get_cpu_model()
+
+    os = get_os_info()
+
+    %{
+      cpu: cpu,
+      cores: cores,
+      memory: memory,
+      os: os
+    }
+  end
+
+  defp get_total_memory do
+    case :memsup.get_system_memory_data() do
+      data when is_list(data) ->
+        Keyword.get(data, :total_memory, 0)
+
+      _ ->
+        0
+    end
+  rescue
+    _ -> 0
+  catch
+    :exit, _ -> 0
+  end
+
+  defp format_memory(bytes) when is_integer(bytes) and bytes > 0 do
+    gb = bytes / (1024 * 1024 * 1024)
+    "#{:erlang.float_to_binary(gb, decimals: 1)} GB"
+  end
+
+  defp format_memory(_), do: "Unknown"
+
+  defp get_cpu_model do
+    case :os.type() do
+      {:unix, :darwin} -> get_darwin_cpu_model()
+      {:unix, _} -> get_linux_cpu_model()
+      _ -> "Unknown"
+    end
+  rescue
+    _ -> "Unknown"
+  end
+
+  defp get_darwin_cpu_model do
+    case System.cmd("sysctl", ["-n", "machdep.cpu.brand_string"], stderr_to_stdout: true) do
+      {output, 0} -> String.trim(output)
+      _ -> "Unknown"
+    end
+  end
+
+  defp get_linux_cpu_model do
+    case File.read("/proc/cpuinfo") do
+      {:ok, content} -> parse_linux_cpuinfo(content)
+      _ -> "Unknown"
+    end
+  end
+
+  defp parse_linux_cpuinfo(content) do
+    content
+    |> String.split("\n")
+    |> Enum.find_value("Unknown", fn line ->
+      if String.starts_with?(line, "model name") do
+        line |> String.split(":") |> List.last() |> String.trim()
+      end
+    end)
+  end
+
+  defp get_os_info do
+    case :os.type() do
+      {:unix, :darwin} -> "macOS"
+      {:unix, :linux} -> "Linux"
+      {:win32, _} -> "Windows"
+      {family, name} -> "#{family}/#{name}"
+    end
+  end
 end

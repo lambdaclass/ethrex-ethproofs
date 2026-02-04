@@ -2,7 +2,6 @@ import Config
 
 # Test configuration - provide dummy values so the application can start
 config :ethproofs_client,
-  dev: true,
   eth_rpc_url: "http://localhost:8545",
   elf_path: "/tmp/test.elf",
   ethproofs_rpc_url: nil,

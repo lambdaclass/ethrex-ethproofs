@@ -69,7 +69,7 @@ defmodule EthProofsClient.ProverTest do
       # Queue should remain empty
       assert :queue.is_empty(new_state.queue)
       # Still proving, not queued
-      assert match?({:running, 100, _}, new_state.status)
+      assert match?({:proving, 100, _}, new_state.status)
     end
   end
 
@@ -83,7 +83,7 @@ defmodule EthProofsClient.ProverTest do
         Prover.handle_info({unknown_port, {:exit_status, 0}}, state)
 
       # State should remain unchanged - still proving
-      assert match?({:running, 100, ^current_port}, new_state.status)
+      assert match?({:proving, 100, ^current_port}, new_state.status)
     end
 
     test "ignores EXIT from unknown port" do
@@ -95,7 +95,7 @@ defmodule EthProofsClient.ProverTest do
         Prover.handle_info({:EXIT, old_port, :normal}, state)
 
       # State should remain unchanged
-      assert match?({:running, 100, ^current_port}, new_state.status)
+      assert match?({:proving, 100, ^current_port}, new_state.status)
     end
 
     test "ignores data from unknown port" do
@@ -152,7 +152,7 @@ defmodule EthProofsClient.ProverTest do
 
       {:reply, status, ^state} = Prover.handle_call(:status, self(), state)
 
-      assert status.status == {:running, 100}
+      assert status.status == {:proving, 100}
       assert status.queue_length == 2
       assert 200 in status.queued_blocks
       assert 300 in status.queued_blocks
@@ -170,7 +170,7 @@ defmodule EthProofsClient.ProverTest do
       port = make_mock_port()
       state = new_state() |> set_proving_with_port(100, port)
 
-      assert match?({:running, 100, ^port}, state.status)
+      assert match?({:proving, 100, ^port}, state.status)
     end
 
     test "queue operations maintain FIFO order" do
@@ -204,11 +204,11 @@ defmodule EthProofsClient.ProverTest do
 
   defp set_proving(state, block_number) do
     port = make_mock_port()
-    %{state | status: {:running, block_number, port}}
+    %{state | status: {:proving, block_number, port}}
   end
 
   defp set_proving_with_port(state, block_number, port) do
-    %{state | status: {:running, block_number, port}}
+    %{state | status: {:proving, block_number, port}}
   end
 
   defp enqueue_block(state, block_number) do
@@ -219,7 +219,7 @@ defmodule EthProofsClient.ProverTest do
     }
   end
 
-  defp currently_proving?(%{status: {:running, block_number, _}}, block_number), do: true
+  defp currently_proving?(%{status: {:proving, block_number, _}}, block_number), do: true
   defp currently_proving?(_, _), do: false
 
   # Create a mock port reference for testing

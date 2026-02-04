@@ -266,7 +266,13 @@ defmodule EthProofsClient.Prover do
     # Broadcast status update
     broadcast_status_update(:idle)
 
-    %{state | status: :idle, proving_since: nil, idle_since: DateTime.utc_now(), current_input_gen_duration: nil}
+    %{
+      state
+      | status: :idle,
+        proving_since: nil,
+        idle_since: DateTime.utc_now(),
+        current_input_gen_duration: nil
+    }
   end
 
   defp read_proof_data(block_number) do

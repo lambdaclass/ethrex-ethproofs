@@ -106,7 +106,12 @@ defmodule EthProofsClient.ProvedBlocksStore do
           new_block_set
         end
 
-      new_state = %{state | blocks: new_blocks, block_set: new_block_set, total_count: state.total_count + 1}
+      new_state = %{
+        state
+        | blocks: new_blocks,
+          block_set: new_block_set,
+          total_count: state.total_count + 1
+      }
 
       # Broadcast the update
       broadcast_update(new_state)

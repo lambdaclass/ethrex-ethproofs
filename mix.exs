@@ -43,6 +43,9 @@ defmodule EthProofsClient.MixProject do
        depth: 1},
       {:tailwind, "~> 0.2", runtime: Mix.env() == :dev},
       {:esbuild, "~> 0.8", runtime: Mix.env() == :dev},
+      # Database
+      {:ecto_sql, "~> 3.12"},
+      {:ecto_sqlite3, "~> 0.17"},
       # Dev/Test
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
@@ -50,14 +53,17 @@ defmodule EthProofsClient.MixProject do
 
   defp aliases do
     [
-      setup: ["deps.get", "assets.setup", "assets.build"],
+      setup: ["deps.get", "ecto.setup", "assets.setup", "assets.build"],
+      "ecto.setup": ["ecto.create", "ecto.migrate"],
+      "ecto.reset": ["ecto.drop", "ecto.setup"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": ["tailwind ethproofs_client", "esbuild ethproofs_client"],
       "assets.deploy": [
         "tailwind ethproofs_client --minify",
         "esbuild ethproofs_client --minify",
         "phx.digest"
-      ]
+      ],
+      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
     ]
   end
 end

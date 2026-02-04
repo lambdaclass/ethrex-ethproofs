@@ -6,6 +6,7 @@ defmodule EthProofsClient.Application do
 
   ```
   EthProofsClient.Supervisor (strategy: :rest_for_one)
+  ├── EthProofsClient.Repo (SQLite database)
   ├── Phoenix.PubSub (for real-time updates)
   ├── EthProofsClient.TaskSupervisor (Task.Supervisor)
   ├── EthProofsClient.ProvedBlocksStore (GenServer)
@@ -26,6 +27,7 @@ defmodule EthProofsClient.Application do
   alias EthProofsClient.MissedBlocksStore
   alias EthProofsClient.ProvedBlocksStore
   alias EthProofsClient.Prover
+  alias EthProofsClient.Repo
 
   def start(_type, _args) do
     # Record application start time for uptime tracking
@@ -36,13 +38,15 @@ defmodule EthProofsClient.Application do
         raise "ELF_PATH environment variable must be set"
 
     children = [
+      # Database must start first
+      Repo,
       # PubSub for real-time updates
       {Phoenix.PubSub, name: EthProofsClient.PubSub},
       # TaskSupervisor must start before InputGenerator depends on it
       {Task.Supervisor, name: EthProofsClient.TaskSupervisor},
-      # ProvedBlocksStore tracks proved blocks
+      # ProvedBlocksStore tracks proved blocks (loads from DB on init)
       ProvedBlocksStore,
-      # MissedBlocksStore tracks failed blocks
+      # MissedBlocksStore tracks failed blocks (loads from DB on init)
       MissedBlocksStore,
       # Core GenServers
       {Prover, elf_path},

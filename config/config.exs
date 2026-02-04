@@ -8,7 +8,13 @@ config :ethproofs_client,
   elf_path: System.get_env("ELF_PATH"),
   ethproofs_rpc_url: System.get_env("ETHPROOFS_RPC_URL"),
   ethproofs_api_key: System.get_env("ETHPROOFS_API_KEY"),
-  ethproofs_cluster_id: System.get_env("ETHPROOFS_CLUSTER_ID")
+  ethproofs_cluster_id: System.get_env("ETHPROOFS_CLUSTER_ID"),
+  ecto_repos: [EthProofsClient.Repo]
+
+# Database configuration
+config :ethproofs_client, EthProofsClient.Repo,
+  database: Path.expand("../ethproofs_client.db", __DIR__),
+  pool_size: 5
 
 # Phoenix endpoint configuration
 config :ethproofs_client, EthProofsClientWeb.Endpoint,

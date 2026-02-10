@@ -128,7 +128,14 @@ defmodule EthProofsClient.Prover do
       reason: "Prover crashed: #{format_error(reason)}"
     })
 
-    new_state = %{state | status: :idle, proving_since: nil, idle_since: DateTime.utc_now(), timeout_ref: nil}
+    new_state = %{
+      state
+      | status: :idle,
+        proving_since: nil,
+        idle_since: DateTime.utc_now(),
+        timeout_ref: nil
+    }
+
     {:noreply, maybe_start_next(new_state)}
   end
 

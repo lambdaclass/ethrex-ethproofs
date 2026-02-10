@@ -9,7 +9,7 @@ config :ethproofs_client,
   ethproofs_rpc_url: System.get_env("ETHPROOFS_RPC_URL"),
   ethproofs_api_key: System.get_env("ETHPROOFS_API_KEY"),
   ethproofs_cluster_id: System.get_env("ETHPROOFS_CLUSTER_ID"),
-  proving_timeout_minutes: String.to_integer(System.get_env("PROVING_TIMEOUT_MINUTES") || "20")
+  proving_timeout_seconds: String.to_integer(System.get_env("PROVING_TIMEOUT_SECONDS") || "1200")
 
 # Phoenix endpoint configuration
 config :ethproofs_client, EthProofsClientWeb.Endpoint,

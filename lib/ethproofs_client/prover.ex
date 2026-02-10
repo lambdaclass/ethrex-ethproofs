@@ -139,7 +139,7 @@ defmodule EthProofsClient.Prover do
         %{status: {:proving, block_number, port}} = state
       ) do
     Logger.warning(
-      "Proving timeout (#{div(proving_timeout_ms(), 60_000)}m) reached for block #{block_number}, killing prover process"
+      "Proving timeout (#{div(proving_timeout_ms(), 1_000)}s) reached for block #{block_number}, killing prover process"
     )
 
     Process.unlink(port)
@@ -154,7 +154,7 @@ defmodule EthProofsClient.Prover do
 
     MissedBlocksStore.add_block(block_number, %{
       stage: :proving,
-      reason: "Proving timeout: exceeded #{div(proving_timeout_ms(), 60_000)} minute limit"
+      reason: "Proving timeout: exceeded #{div(proving_timeout_ms(), 1_000)}s limit"
     })
 
     broadcast_status_update(:idle)
@@ -356,7 +356,7 @@ defmodule EthProofsClient.Prover do
   defp sanitize_status({:proving, block_number, _port}), do: {:proving, block_number}
 
   defp proving_timeout_ms do
-    :timer.minutes(Application.get_env(:ethproofs_client, :proving_timeout_minutes, 20))
+    :timer.seconds(Application.get_env(:ethproofs_client, :proving_timeout_seconds, 1200))
   end
 
   defp cancel_timeout(nil), do: :ok

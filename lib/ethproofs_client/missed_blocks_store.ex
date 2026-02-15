@@ -2,6 +2,9 @@ defmodule EthProofsClient.MissedBlocksStore do
   @moduledoc """
   GenServer that maintains an ordered list of missed/failed blocks with their metadata.
 
+  Data is persisted to SQLite and loaded on startup. The in-memory cache provides
+  fast reads while the database ensures durability across restarts.
+
   A block is considered "missed" when it fails at any stage of the pipeline:
   - Input generation failure (RPC errors, NIF errors, task crashes)
   - Proving failure (cargo-zisk errors, port crashes)
@@ -24,6 +27,11 @@ defmodule EthProofsClient.MissedBlocksStore do
 
   use GenServer
   require Logger
+
+  import Ecto.Query
+
+  alias EthProofsClient.Blocks.MissedBlock
+  alias EthProofsClient.Repo
 
   @max_blocks 100
   @pubsub_topic "missed_blocks"
@@ -81,7 +89,9 @@ defmodule EthProofsClient.MissedBlocksStore do
 
   @impl true
   def init(_opts) do
-    {:ok, %__MODULE__{}}
+    state = load_from_database()
+    Logger.info("MissedBlocksStore initialized with #{state.total_count} blocks from database")
+    {:ok, state}
   end
 
   @impl true
@@ -89,38 +99,7 @@ defmodule EthProofsClient.MissedBlocksStore do
     if MapSet.member?(state.block_set, block_number) do
       {:reply, :duplicate, state}
     else
-      block = %{
-        block_number: block_number,
-        failed_at: Map.get(metadata, :failed_at, DateTime.utc_now()),
-        stage: Map.get(metadata, :stage, :unknown),
-        reason: Map.get(metadata, :reason, "Unknown error")
-      }
-
-      # Add to front, trim if necessary
-      new_blocks = [block | state.blocks] |> Enum.take(@max_blocks)
-      new_block_set = MapSet.put(state.block_set, block_number)
-
-      # Trim the set if we exceeded max_blocks
-      new_block_set =
-        if length(state.blocks) >= @max_blocks do
-          oldest = List.last(state.blocks)
-          MapSet.delete(new_block_set, oldest.block_number)
-        else
-          new_block_set
-        end
-
-      new_state = %{
-        state
-        | blocks: new_blocks,
-          block_set: new_block_set,
-          total_count: state.total_count + 1
-      }
-
-      # Broadcast the update
-      broadcast_update(new_state)
-
-      Logger.warning("Missed block #{block_number} at stage #{block.stage}: #{block.reason}")
-      {:reply, :ok, new_state}
+      do_add_block(block_number, metadata, state)
     end
   end
 
@@ -141,12 +120,105 @@ defmodule EthProofsClient.MissedBlocksStore do
 
   @impl true
   def handle_call(:clear, _from, _state) do
+    Repo.delete_all(MissedBlock)
+
     new_state = %__MODULE__{}
     broadcast_update(new_state)
     {:reply, :ok, new_state}
   end
 
   # --- Private Functions ---
+
+  defp do_add_block(block_number, metadata, state) do
+    failed_at = Map.get(metadata, :failed_at, DateTime.utc_now())
+    stage = Map.get(metadata, :stage, :unknown)
+    reason = Map.get(metadata, :reason, "Unknown error")
+
+    case persist_block(block_number, failed_at, stage, reason) do
+      {:ok, _} ->
+        new_state = update_state_with_block(state, block_number, failed_at, stage, reason)
+        broadcast_update(new_state)
+        Logger.warning("Missed block #{block_number} at stage #{stage}: #{reason}")
+        {:reply, :ok, new_state}
+
+      {:error, changeset} ->
+        Logger.error("Failed to persist missed block #{block_number}: #{inspect(changeset.errors)}")
+        {:reply, {:error, changeset.errors}, state}
+    end
+  end
+
+  defp update_state_with_block(state, block_number, failed_at, stage, reason) do
+    block = %{
+      block_number: block_number,
+      failed_at: failed_at,
+      stage: stage,
+      reason: reason
+    }
+
+    new_blocks = [block | state.blocks] |> Enum.take(@max_blocks)
+    new_block_set = MapSet.put(state.block_set, block_number)
+    new_block_set = trim_block_set(state.blocks, new_block_set)
+
+    %{
+      state
+      | blocks: new_blocks,
+        block_set: new_block_set,
+        total_count: state.total_count + 1
+    }
+  end
+
+  defp trim_block_set(blocks, block_set) when length(blocks) >= @max_blocks do
+    oldest = List.last(blocks)
+    MapSet.delete(block_set, oldest.block_number)
+  end
+
+  defp trim_block_set(_blocks, block_set), do: block_set
+
+  defp load_from_database do
+    # Get total count
+    total_count = Repo.aggregate(MissedBlock, :count)
+
+    # Load last N blocks ordered by failed_at desc
+    blocks =
+      MissedBlock
+      |> order_by([b], desc: b.failed_at)
+      |> limit(@max_blocks)
+      |> Repo.all()
+      |> Enum.map(&schema_to_map/1)
+
+    # Build the set from loaded blocks
+    block_set = blocks |> Enum.map(& &1.block_number) |> MapSet.new()
+
+    %__MODULE__{
+      blocks: blocks,
+      block_set: block_set,
+      total_count: total_count
+    }
+  rescue
+    e ->
+      Logger.warning("Failed to load missed blocks from database: #{inspect(e)}")
+      %__MODULE__{}
+  end
+
+  defp persist_block(block_number, failed_at, stage, reason) do
+    %MissedBlock{}
+    |> MissedBlock.changeset(%{
+      block_number: block_number,
+      failed_at: failed_at,
+      stage: stage,
+      reason: reason
+    })
+    |> Repo.insert()
+  end
+
+  defp schema_to_map(%MissedBlock{} = block) do
+    %{
+      block_number: block.block_number,
+      failed_at: block.failed_at,
+      stage: block.stage,
+      reason: block.reason
+    }
+  end
 
   defp broadcast_update(state) do
     Phoenix.PubSub.broadcast(

@@ -39,3 +39,8 @@ priv/native
 
 # Ignore output directory for proofs
 /output/
+
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal

@@ -2,8 +2,12 @@ defmodule EthProofsClient.ProvedBlocksStore do
   @moduledoc """
   GenServer that maintains an ordered list of proved blocks with their metadata.
 
+  Data is persisted to SQLite and loaded on startup. The in-memory cache provides
+  fast reads while the database ensures durability across restarts.
+
   This store is designed to:
-  - Keep the last N proved blocks in memory
+  - Keep the last N proved blocks in memory (loaded from DB on init)
+  - Persist all blocks to SQLite for durability
   - Broadcast updates via PubSub for real-time UI updates
   - Provide O(1) lookups and O(1) insertions
 
@@ -25,6 +29,11 @@ defmodule EthProofsClient.ProvedBlocksStore do
 
   use GenServer
   require Logger
+
+  import Ecto.Query
+
+  alias EthProofsClient.Blocks.ProvedBlock
+  alias EthProofsClient.Repo
 
   @max_blocks 100
   @pubsub_topic "proved_blocks"
@@ -77,7 +86,9 @@ defmodule EthProofsClient.ProvedBlocksStore do
 
   @impl true
   def init(_opts) do
-    {:ok, %__MODULE__{}}
+    state = load_from_database()
+    Logger.info("ProvedBlocksStore initialized with #{state.total_count} blocks from database")
+    {:ok, state}
   end
 
   @impl true
@@ -85,39 +96,7 @@ defmodule EthProofsClient.ProvedBlocksStore do
     if MapSet.member?(state.block_set, block_number) do
       {:reply, :duplicate, state}
     else
-      block = %{
-        block_number: block_number,
-        proved_at: Map.get(metadata, :proved_at, DateTime.utc_now()),
-        proving_duration_seconds: Map.get(metadata, :proving_duration_seconds),
-        input_generation_duration_seconds: Map.get(metadata, :input_generation_duration_seconds)
-      }
-
-      # Add to front, trim if necessary
-      new_blocks = [block | state.blocks] |> Enum.take(@max_blocks)
-      new_block_set = MapSet.put(state.block_set, block_number)
-
-      # Trim the set if we exceeded max_blocks
-      new_block_set =
-        if length(state.blocks) >= @max_blocks do
-          # Remove the oldest block from the set
-          oldest = List.last(state.blocks)
-          MapSet.delete(new_block_set, oldest.block_number)
-        else
-          new_block_set
-        end
-
-      new_state = %{
-        state
-        | blocks: new_blocks,
-          block_set: new_block_set,
-          total_count: state.total_count + 1
-      }
-
-      # Broadcast the update
-      broadcast_update(new_state)
-
-      Logger.info("Added proved block #{block_number}")
-      {:reply, :ok, new_state}
+      do_add_block(block_number, metadata, state)
     end
   end
 
@@ -138,12 +117,103 @@ defmodule EthProofsClient.ProvedBlocksStore do
 
   @impl true
   def handle_call(:clear, _from, _state) do
+    Repo.delete_all(ProvedBlock)
+
     new_state = %__MODULE__{}
     broadcast_update(new_state)
     {:reply, :ok, new_state}
   end
 
   # --- Private Functions ---
+
+  defp do_add_block(block_number, metadata, state) do
+    proved_at = Map.get(metadata, :proved_at, DateTime.utc_now())
+
+    case persist_block(block_number, metadata, proved_at) do
+      {:ok, _} ->
+        new_state = update_state_with_block(state, block_number, metadata, proved_at)
+        broadcast_update(new_state)
+        Logger.info("Added proved block #{block_number}")
+        {:reply, :ok, new_state}
+
+      {:error, changeset} ->
+        Logger.error("Failed to persist proved block #{block_number}: #{inspect(changeset.errors)}")
+        {:reply, {:error, changeset.errors}, state}
+    end
+  end
+
+  defp update_state_with_block(state, block_number, metadata, proved_at) do
+    block = %{
+      block_number: block_number,
+      proved_at: proved_at,
+      proving_duration_seconds: Map.get(metadata, :proving_duration_seconds),
+      input_generation_duration_seconds: Map.get(metadata, :input_generation_duration_seconds)
+    }
+
+    new_blocks = [block | state.blocks] |> Enum.take(@max_blocks)
+    new_block_set = MapSet.put(state.block_set, block_number)
+    new_block_set = trim_block_set(state.blocks, new_block_set)
+
+    %{
+      state
+      | blocks: new_blocks,
+        block_set: new_block_set,
+        total_count: state.total_count + 1
+    }
+  end
+
+  defp trim_block_set(blocks, block_set) when length(blocks) >= @max_blocks do
+    oldest = List.last(blocks)
+    MapSet.delete(block_set, oldest.block_number)
+  end
+
+  defp trim_block_set(_blocks, block_set), do: block_set
+
+  defp load_from_database do
+    # Get total count
+    total_count = Repo.aggregate(ProvedBlock, :count)
+
+    # Load last N blocks ordered by proved_at desc
+    blocks =
+      ProvedBlock
+      |> order_by([b], desc: b.proved_at)
+      |> limit(@max_blocks)
+      |> Repo.all()
+      |> Enum.map(&schema_to_map/1)
+
+    # Build the set from loaded blocks
+    block_set = blocks |> Enum.map(& &1.block_number) |> MapSet.new()
+
+    %__MODULE__{
+      blocks: blocks,
+      block_set: block_set,
+      total_count: total_count
+    }
+  rescue
+    e ->
+      Logger.warning("Failed to load proved blocks from database: #{inspect(e)}")
+      %__MODULE__{}
+  end
+
+  defp persist_block(block_number, metadata, proved_at) do
+    %ProvedBlock{}
+    |> ProvedBlock.changeset(%{
+      block_number: block_number,
+      proved_at: proved_at,
+      proving_duration_seconds: Map.get(metadata, :proving_duration_seconds),
+      input_generation_duration_seconds: Map.get(metadata, :input_generation_duration_seconds)
+    })
+    |> Repo.insert()
+  end
+
+  defp schema_to_map(%ProvedBlock{} = block) do
+    %{
+      block_number: block.block_number,
+      proved_at: block.proved_at,
+      proving_duration_seconds: block.proving_duration_seconds,
+      input_generation_duration_seconds: block.input_generation_duration_seconds
+    }
+  end
 
   defp broadcast_update(state) do
     Phoenix.PubSub.broadcast(

@@ -11,20 +11,22 @@ defmodule EthProofsClient.BlockMetadataTest do
 
   describe "put_from_json/2 and get/1" do
     test "stores and retrieves valid block metadata" do
-      block_json = Jason.encode!(%{
-        "gasUsed" => "0xe4e1c0",
-        "transactions" => ["0xabc", "0xdef", "0x123"]
-      })
+      block_json =
+        Jason.encode!(%{
+          "gasUsed" => "0xe4e1c0",
+          "transactions" => ["0xabc", "0xdef", "0x123"]
+        })
 
       assert :ok = BlockMetadata.put_from_json(100, block_json)
       assert {:ok, %{gas_used: 15_000_000, tx_count: 3}} = BlockMetadata.get(100)
     end
 
     test "handles gas_used without 0x prefix" do
-      block_json = Jason.encode!(%{
-        "gasUsed" => "e4e1c0",
-        "transactions" => []
-      })
+      block_json =
+        Jason.encode!(%{
+          "gasUsed" => "e4e1c0",
+          "transactions" => []
+        })
 
       assert :ok = BlockMetadata.put_from_json(200, block_json)
       assert {:ok, %{gas_used: 15_000_000, tx_count: 0}} = BlockMetadata.get(200)

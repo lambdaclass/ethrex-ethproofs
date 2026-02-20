@@ -113,8 +113,10 @@ defmodule EthProofsClient.SystemInfo do
         gpus =
           output
           |> String.split("\n")
-          |> Enum.filter(&(String.contains?(&1, "VGA compatible controller") or
-                             String.contains?(&1, "3D controller")))
+          |> Enum.filter(
+            &(String.contains?(&1, "VGA compatible controller") or
+                String.contains?(&1, "3D controller"))
+          )
           |> Enum.map(fn line ->
             case String.split(line, ": ", parts: 2) do
               [_, name] -> String.trim(name)

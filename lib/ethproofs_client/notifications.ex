@@ -70,7 +70,10 @@ defmodule EthProofsClient.Notifications do
 
       :ok
     else
-      Logger.debug("Notifications disabled (#{disabled_reason()}), skipping for block #{block_number}")
+      Logger.debug(
+        "Notifications disabled (#{disabled_reason()}), skipping for block #{block_number}"
+      )
+
       :ok
     end
   end

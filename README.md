@@ -120,8 +120,9 @@ export ETHPROOFS_API_KEY=<ETHPROOFS_API_KEY>
 export ETHPROOFS_RPC_URL=<ETHPROOFS_RPC_URL>
 export ETHPROOFS_CLUSTER_ID=<ETHPROOFS_CLUSTER_ID>
 
-# Optional: Slack notifications
-export SLACK_WEBHOOK=<SLACK_WEBHOOK_URL>
+# Optional: Slack notifications (separate channels for success and alerts)
+export SLACK_WEBHOOK_SUCCESS=<SLACK_WEBHOOK_URL_FOR_SUCCESS>
+export SLACK_WEBHOOK_ALERTS=<SLACK_WEBHOOK_URL_FOR_ALERTS>
 
 # Optional: Enable debug logging
 export LOG_LEVEL=debug
@@ -316,7 +317,8 @@ make clean     # Remove build artifacts
 | `ETHPROOFS_API_KEY` | No | EthProofs API authentication token |
 | `ETHPROOFS_CLUSTER_ID` | No | EthProofs cluster identifier |
 | `LOG_LEVEL` | No | Logging level (`debug`, `info`, `warning`, `error`) |
-| `SLACK_WEBHOOK` | No | Slack incoming webhook URL for notifications. When not set, notifications are silently skipped. |
+| `SLACK_WEBHOOK_SUCCESS` | No | Slack webhook URL for successful proof notifications. |
+| `SLACK_WEBHOOK_ALERTS` | No | Slack webhook URL for failure/warning notifications. |
 | `GIT_BRANCH` | No | Override git branch detection for notifications (useful in Docker/CI) |
 | `GIT_COMMIT` | No | Override git commit detection for notifications (useful in Docker/CI) |
 | `HEALTH_PORT` | No | Port for health HTTP endpoint (default: 4000) |
@@ -411,30 +413,32 @@ curl -f http://localhost:4000/api/health/live   # Returns 200 if alive
 
 ### Slack Notifications
 
-The application can send Slack notifications for key pipeline events. To enable, set the `SLACK_WEBHOOK` environment variable to a Slack [incoming webhook URL](https://api.slack.com/messaging/webhooks).
+The application can send Slack notifications for key pipeline events to two separate channels: one for successful proofs and one for failures/warnings. Configure them with [incoming webhook URLs](https://api.slack.com/messaging/webhooks).
 
 **Events notified:**
 
-| Event | Emoji | When |
-|-------|-------|------|
-| Proof submitted | :white_check_mark: | Proof successfully submitted to EthProofs API |
-| Input generation failed | :warning: | Block input generation error or task crash |
-| Proof generation failed | :warning: | Prover exit, port crash, or timeout |
-| Proof data read failed | :warning: | Proof artifacts unreadable after successful exit |
-| EthProofs API call failed | :warning: | Any `queued`/`proving`/`proved` API request failed |
+| Event | Channel | Emoji | When |
+|-------|---------|-------|------|
+| Proof submitted | `success` | :white_check_mark: | Proof successfully submitted to EthProofs API |
+| Input generation failed | `alerts` | :warning: | Block input generation error or task crash |
+| Proof generation failed | `alerts` | :warning: | Prover exit, port crash, or timeout |
+| Proof data read failed | `alerts` | :warning: | Proof artifacts unreadable after successful exit |
+| EthProofs API call failed | `alerts` | :warning: | Any `queued`/`proving`/`proved` API request failed |
 
-**Requirements:** Notifications only fire when `SLACK_WEBHOOK` is set **and** all `ETHPROOFS_*` variables are configured. Without these, notifications are silently skipped and the pipeline continues normally.
+**Requirements:** Notifications only fire when at least one `SLACK_WEBHOOK_*` is set **and** all `ETHPROOFS_*` variables are configured. Each channel is independent — you can configure only one, and notifications for the unconfigured channel are silently skipped.
 
 **Runtime webhook updates via IEx:**
 
-The webhook URL can be updated at runtime without restarting the application:
+Webhook URLs can be updated at runtime without restarting the application:
 
 ```elixir
-# Update webhook URL
-EthProofsClient.Notifications.Slack.set_webhook("https://hooks.slack.com/services/T/B/X")
+# Update webhook URLs
+EthProofsClient.Notifications.Slack.set_webhook(:success, "https://hooks.slack.com/services/T/B/X")
+EthProofsClient.Notifications.Slack.set_webhook(:alerts, "https://hooks.slack.com/services/T/B/Y")
 
-# Check current webhook
-EthProofsClient.Notifications.Slack.get_webhook()
+# Check current webhooks
+EthProofsClient.Notifications.Slack.get_webhook(:success)
+EthProofsClient.Notifications.Slack.get_webhook(:alerts)
 
 # Check if notifications are enabled
 EthProofsClient.Notifications.enabled?()

@@ -11,12 +11,12 @@ defmodule EthProofsClient.Notifications do
   # --- Public API ---
 
   def enabled? do
-    webhook = Slack.get_webhook()
-    webhook != nil and webhook != "" and ethproofs_configured?()
+    Slack.any_webhook_configured?() and ethproofs_configured?()
   end
 
   def input_generation_failed(block_number, reason) do
     notify_event(
+      :alerts,
       ":warning: Block #{block_number} input generation failed.",
       block_number,
       failure_fields("input generation", reason)
@@ -25,6 +25,7 @@ defmodule EthProofsClient.Notifications do
 
   def proof_generation_failed(block_number, reason) do
     notify_event(
+      :alerts,
       ":warning: Block #{block_number} proof generation failed.",
       block_number,
       failure_fields("proof generation", reason)
@@ -33,6 +34,7 @@ defmodule EthProofsClient.Notifications do
 
   def proof_data_failed(block_number, reason) do
     notify_event(
+      :alerts,
       ":warning: Block #{block_number} proof data read failed.",
       block_number,
       failure_fields("proof data read", reason)
@@ -41,6 +43,7 @@ defmodule EthProofsClient.Notifications do
 
   def ethproofs_request_failed(block_number, endpoint, reason) do
     notify_event(
+      :alerts,
       ":warning: Block #{block_number} EthProofs API (#{endpoint}) failed.",
       block_number,
       failure_fields("EthProofs API (#{endpoint})", reason)
@@ -49,6 +52,7 @@ defmodule EthProofsClient.Notifications do
 
   def proof_submitted(block_number, proving_time_ms) do
     notify_event(
+      :success,
       ":white_check_mark: Block #{block_number} proved and submitted to EthProofs.",
       block_number,
       [{"Proving time", Helpers.format_duration_ms(proving_time_ms)}]
@@ -57,29 +61,29 @@ defmodule EthProofsClient.Notifications do
 
   # --- Private Functions ---
 
-  defp notify_event(headline, block_number, event_fields) do
-    if enabled?() do
+  defp notify_event(channel, headline, block_number, event_fields) do
+    if enabled?() and Slack.webhook_present?(channel) do
       meta = block_metadata(block_number)
       sys = SystemInfo.get()
       fields = event_fields ++ block_fields(meta) ++ system_fields(sys)
       payload = %{blocks: build_message_blocks(headline, fields)}
 
       Task.Supervisor.start_child(EthProofsClient.TaskSupervisor, fn ->
-        safe_deliver(payload, "block #{block_number}")
+        safe_deliver(payload, channel, "block #{block_number}")
       end)
 
       :ok
     else
       Logger.debug(
-        "Notifications disabled (#{disabled_reason()}), skipping for block #{block_number}"
+        "Notifications disabled (#{disabled_reason(channel)}), skipping for block #{block_number}"
       )
 
       :ok
     end
   end
 
-  defp safe_deliver(payload, context) do
-    Slack.notify(payload)
+  defp safe_deliver(payload, channel, context) do
+    Slack.notify(payload, channel)
   rescue
     e ->
       Logger.error("Slack notification crashed (#{context}): #{inspect(e)}")
@@ -88,10 +92,13 @@ defmodule EthProofsClient.Notifications do
       Logger.error("Slack notification failed (#{context}, #{kind}): #{inspect(reason)}")
   end
 
-  defp disabled_reason do
+  defp disabled_reason(channel) do
     cond do
-      is_nil(Slack.get_webhook()) or Slack.get_webhook() == "" ->
-        "Slack webhook not configured"
+      not Slack.any_webhook_configured?() ->
+        "no Slack webhooks configured"
+
+      not Slack.webhook_present?(channel) ->
+        "Slack #{channel} webhook not configured"
 
       is_nil(Rpc.ethproofs_api_key()) ->
         "ETHPROOFS_API_KEY not set"

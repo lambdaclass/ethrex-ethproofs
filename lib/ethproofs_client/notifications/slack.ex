@@ -8,23 +8,27 @@ defmodule EthProofsClient.Notifications.Slack do
 
   plug(Tesla.Middleware.Headers, [{"content-type", "application/json"}])
 
-  @webhook_key {__MODULE__, :webhook}
+  @channels [:success, :alerts]
 
-  # Send Block Kit payload or plain text to Slack
-  def notify(payload) when is_map(payload), do: send_payload(payload)
-  def notify(message) when is_binary(message), do: send_payload(%{text: message})
+  # Send Block Kit payload or plain text to the given channel
+  def notify(payload, channel) when is_map(payload), do: send_payload(payload, channel)
 
-  # Runtime-updatable webhook URL (usable from IEx)
-  def set_webhook(url) do
-    :persistent_term.put(@webhook_key, url)
+  def notify(message, channel) when is_binary(message),
+    do: send_payload(%{text: message}, channel)
+
+  # Runtime-updatable webhook URLs (usable from IEx)
+  def set_webhook(channel, url) when channel in @channels do
+    :persistent_term.put(webhook_key(channel), url)
   end
 
-  # Returns current webhook URL. Lazy-loads from app config on first call.
-  def get_webhook do
-    case :persistent_term.get(@webhook_key, :not_set) do
+  # Returns current webhook URL for a channel. Lazy-loads from app config on first call.
+  def get_webhook(channel) when channel in @channels do
+    key = webhook_key(channel)
+
+    case :persistent_term.get(key, :not_set) do
       :not_set ->
-        url = Application.get_env(:ethproofs_client, :slack_webhook)
-        :persistent_term.put(@webhook_key, url)
+        url = Application.get_env(:ethproofs_client, config_key(channel))
+        :persistent_term.put(key, url)
         url
 
       url ->
@@ -32,22 +36,41 @@ defmodule EthProofsClient.Notifications.Slack do
     end
   end
 
-  # Test helper
-  def clear_webhook do
-    :persistent_term.erase(@webhook_key)
-  rescue
-    ArgumentError -> :ok
+  # Returns true if at least one webhook is configured
+  def any_webhook_configured? do
+    Enum.any?(@channels, &webhook_present?/1)
   end
 
-  defp send_payload(payload) do
-    webhook = get_webhook()
+  def webhook_present?(channel) do
+    url = get_webhook(channel)
+    url != nil and url != ""
+  end
+
+  # Test helper
+  def clear_webhooks do
+    Enum.each(@channels, fn channel ->
+      try do
+        :persistent_term.erase(webhook_key(channel))
+      rescue
+        ArgumentError -> :ok
+      end
+    end)
+  end
+
+  defp webhook_key(channel), do: {__MODULE__, :webhook, channel}
+
+  defp config_key(:success), do: :slack_webhook_success
+  defp config_key(:alerts), do: :slack_webhook_alerts
+
+  defp send_payload(payload, channel) do
+    webhook = get_webhook(channel)
 
     if is_nil(webhook) or webhook == "" do
-      Logger.error("Slack webhook missing; dropping notification")
+      Logger.debug("Slack #{channel} webhook not configured; skipping notification")
       {:error, :missing_webhook}
     else
       summary = payload_summary(payload)
-      Logger.debug("Posting Slack notification: #{summary}")
+      Logger.debug("Posting Slack notification (#{channel}): #{summary}")
       body = Jason.encode!(payload)
 
       case post(webhook, body) do
@@ -55,7 +78,7 @@ defmodule EthProofsClient.Notifications.Slack do
           handle_response(rsp)
 
         {:error, reason} ->
-          Logger.error("Slack notification failed: #{inspect(reason)}")
+          Logger.error("Slack notification failed (#{channel}): #{inspect(reason)}")
           {:error, reason}
       end
     end

@@ -66,7 +66,8 @@ defmodule EthProofsClient.Notifications do
       meta = block_metadata(block_number)
       sys = SystemInfo.get()
       fields = event_fields ++ block_fields(meta) ++ system_fields(sys)
-      payload = %{blocks: build_message_blocks(headline, fields)}
+      buttons = action_buttons(channel, block_number)
+      payload = %{blocks: build_message_blocks(headline, fields, buttons)}
 
       Task.Supervisor.start_child(EthProofsClient.TaskSupervisor, fn ->
         safe_deliver(payload, channel, "block #{block_number}")
@@ -142,17 +143,49 @@ defmodule EthProofsClient.Notifications do
     ]
   end
 
+  # --- Button Builders ---
+
+  @dashboard_url "http://ts.ethproofs.internal.lambdaclass.com"
+  @ethproofs_block_url "https://ethproofs.org/blocks/"
+
+  defp action_buttons(:success, block_number) do
+    [dashboard_button(), ethproofs_block_button(block_number)]
+  end
+
+  defp action_buttons(_channel, _block_number) do
+    [dashboard_button()]
+  end
+
+  defp dashboard_button do
+    %{
+      type: "button",
+      text: %{type: "plain_text", text: "Ethrex Ethproofs Client", emoji: true},
+      url: @dashboard_url
+    }
+  end
+
+  defp ethproofs_block_button(block_number) do
+    %{
+      type: "button",
+      text: %{type: "plain_text", text: "View on EthProofs", emoji: true},
+      url: @ethproofs_block_url <> Integer.to_string(block_number)
+    }
+  end
+
   # --- Message Builder ---
 
-  defp build_message_blocks(headline, fields) do
+  defp build_message_blocks(headline, fields, buttons) do
     blocks = [
       %{type: "header", text: %{type: "plain_text", text: headline, emoji: true}}
     ]
 
-    case Enum.map_join(fields, "\n", fn {label, value} -> "*#{label}:* #{value}" end) do
-      "" -> blocks
-      text -> blocks ++ [%{type: "section", text: %{type: "mrkdwn", text: text}}]
-    end
+    blocks =
+      case Enum.map_join(fields, "\n", fn {label, value} -> "*#{label}:* #{value}" end) do
+        "" -> blocks
+        text -> blocks ++ [%{type: "section", text: %{type: "mrkdwn", text: text}}]
+      end
+
+    blocks ++ [%{type: "actions", elements: buttons}]
   end
 
   defp block_metadata(block_number) do

@@ -22,6 +22,7 @@ defmodule EthProofsClient.Prover do
     :proving_since,
     :idle_since,
     :current_input_gen_duration,
+    :timeout_ref,
     queue: :queue.new(),
     queued_blocks: MapSet.new()
   ]
@@ -107,6 +108,7 @@ defmodule EthProofsClient.Prover do
 
     # Unlink immediately to prevent receiving duplicate EXIT message
     Process.unlink(port)
+    cancel_timeout(state.timeout_ref)
 
     new_state = handle_proof_completion(state, block_number, status)
     {:noreply, maybe_start_next(new_state)}
@@ -119,13 +121,68 @@ defmodule EthProofsClient.Prover do
       "Port died unexpectedly for block #{block_number}: #{inspect(reason)}. Continuing with next item."
     )
 
+    cancel_timeout(state.timeout_ref)
+
     MissedBlocksStore.add_block(block_number, %{
       stage: :proving,
       reason: "Prover crashed: #{format_error(reason)}"
     })
 
-    new_state = %{state | status: :idle, proving_since: nil, idle_since: DateTime.utc_now()}
+    new_state = %{
+      state
+      | status: :idle,
+        proving_since: nil,
+        idle_since: DateTime.utc_now(),
+        timeout_ref: nil
+    }
+
     {:noreply, maybe_start_next(new_state)}
+  end
+
+  # Handle proving timeout - kill the stuck prover process and move on
+  @impl true
+  def handle_info(
+        {:proving_timeout, block_number},
+        %{status: {:proving, block_number, port}} = state
+      ) do
+    Logger.warning(
+      "Proving timeout (#{div(proving_timeout_ms(), 1_000)}s) reached for block #{block_number}, killing prover process"
+    )
+
+    Process.unlink(port)
+
+    case Port.info(port, :os_pid) do
+      {:os_pid, os_pid} ->
+        System.cmd("kill", ["-9", Integer.to_string(os_pid)])
+
+      nil ->
+        :ok
+    end
+
+    MissedBlocksStore.add_block(block_number, %{
+      stage: :proving,
+      reason: "Proving timeout: exceeded #{div(proving_timeout_ms(), 1_000)}s limit"
+    })
+
+    broadcast_status_update(:idle)
+
+    new_state = %{
+      state
+      | status: :idle,
+        proving_since: nil,
+        idle_since: DateTime.utc_now(),
+        timeout_ref: nil,
+        current_input_gen_duration: nil
+    }
+
+    {:noreply, maybe_start_next(new_state)}
+  end
+
+  # Stale timeout for a block we're no longer proving (race condition)
+  @impl true
+  def handle_info({:proving_timeout, _block_number}, state) do
+    Logger.debug("Ignoring stale proving timeout")
+    {:noreply, state}
   end
 
   # Ignore messages from unknown/old ports
@@ -190,6 +247,10 @@ defmodule EthProofsClient.Prover do
         # Broadcast status update
         broadcast_status_update({:proving, block_number})
 
+        # Schedule proving timeout
+        timeout_ref =
+          Process.send_after(self(), {:proving_timeout, block_number}, proving_timeout_ms())
+
         %{
           state
           | status: {:proving, block_number, port},
@@ -197,7 +258,8 @@ defmodule EthProofsClient.Prover do
             queued_blocks: MapSet.delete(state.queued_blocks, block_number),
             proving_since: DateTime.utc_now(),
             idle_since: nil,
-            current_input_gen_duration: input_gen_duration
+            current_input_gen_duration: input_gen_duration,
+            timeout_ref: timeout_ref
         }
 
       {:empty, _queue} ->
@@ -271,7 +333,8 @@ defmodule EthProofsClient.Prover do
       | status: :idle,
         proving_since: nil,
         idle_since: DateTime.utc_now(),
-        current_input_gen_duration: nil
+        current_input_gen_duration: nil,
+        timeout_ref: nil
     }
   end
 
@@ -298,6 +361,13 @@ defmodule EthProofsClient.Prover do
 
   defp sanitize_status(:idle), do: :idle
   defp sanitize_status({:proving, block_number, _port}), do: {:proving, block_number}
+
+  defp proving_timeout_ms do
+    :timer.seconds(Application.get_env(:ethproofs_client, :proving_timeout_seconds, 1200))
+  end
+
+  defp cancel_timeout(nil), do: :ok
+  defp cancel_timeout(ref), do: Process.cancel_timer(ref)
 
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(reason), do: inspect(reason)

@@ -9,7 +9,9 @@ config :ethproofs_client,
   ethproofs_rpc_url: System.get_env("ETHPROOFS_RPC_URL"),
   ethproofs_api_key: System.get_env("ETHPROOFS_API_KEY"),
   ethproofs_cluster_id: System.get_env("ETHPROOFS_CLUSTER_ID"),
-  proving_timeout_seconds: String.to_integer(System.get_env("PROVING_TIMEOUT_SECONDS") || "1200")
+  proving_timeout_seconds: String.to_integer(System.get_env("PROVING_TIMEOUT_SECONDS") || "1200"),
+  slack_webhook_success: System.get_env("SLACK_WEBHOOK_SUCCESS"),
+  slack_webhook_alerts: System.get_env("SLACK_WEBHOOK_ALERTS")
 
 # Phoenix endpoint configuration
 config :ethproofs_client, EthProofsClientWeb.Endpoint,

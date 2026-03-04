@@ -13,6 +13,7 @@ defmodule EthProofsClient.Prover do
   require Logger
 
   alias EthProofsClient.MissedBlocksStore
+  alias EthProofsClient.Notifications
 
   @output_dir "output"
 
@@ -122,6 +123,7 @@ defmodule EthProofsClient.Prover do
     )
 
     cancel_timeout(state.timeout_ref)
+    Notifications.proof_generation_failed(block_number, {:port_exit, reason})
 
     MissedBlocksStore.add_block(block_number, %{
       stage: :proving,
@@ -158,6 +160,8 @@ defmodule EthProofsClient.Prover do
       nil ->
         :ok
     end
+
+    Notifications.proof_generation_failed(block_number, {:timeout, proving_timeout_ms()})
 
     MissedBlocksStore.add_block(block_number, %{
       stage: :proving,
@@ -299,30 +303,48 @@ defmodule EthProofsClient.Prover do
     proving_duration = proving_duration(state)
     input_gen_duration = state.current_input_gen_duration
 
-    case read_proof_data(block_number) do
-      {:ok, proof_data} ->
-        Logger.info(
-          "Proved block #{block_number} in #{proof_data.time / 1000} seconds using #{proof_data.cycles} cycles"
-        )
+    if exit_status != 0 do
+      Logger.error("Prover exited with non-zero status #{exit_status} for block #{block_number}")
+      Notifications.proof_generation_failed(block_number, {:exit_status, exit_status})
 
-        report_proved(block_number, proof_data)
+      MissedBlocksStore.add_block(block_number, %{
+        stage: :proving,
+        reason: "Proving failed (exit_status: #{exit_status})"
+      })
+    else
+      case read_proof_data(block_number) do
+        {:ok, proof_data} ->
+          Logger.info(
+            "Proved block #{block_number} in #{proof_data.time / 1000} seconds using #{proof_data.cycles} cycles"
+          )
 
-        # Store in ProvedBlocksStore for dashboard
-        EthProofsClient.ProvedBlocksStore.add_block(block_number, %{
-          proved_at: DateTime.utc_now(),
-          proving_duration_seconds: proving_duration,
-          input_generation_duration_seconds: input_gen_duration
-        })
+          case report_proved(block_number, proof_data) do
+            {:ok, _proof_id} ->
+              Notifications.proof_submitted(block_number, proof_data.time)
 
-      {:error, reason} ->
-        Logger.error(
-          "Failed to read proof data for block #{block_number} (exit_status: #{exit_status}): #{inspect(reason)}"
-        )
+            {:error, reason} ->
+              Notifications.ethproofs_request_failed(block_number, "proved", reason)
+          end
 
-        MissedBlocksStore.add_block(block_number, %{
-          stage: :proving,
-          reason: "Proving failed (exit_status: #{exit_status}): #{format_error(reason)}"
-        })
+          # Store in ProvedBlocksStore for dashboard
+          EthProofsClient.ProvedBlocksStore.add_block(block_number, %{
+            proved_at: DateTime.utc_now(),
+            proving_duration_seconds: proving_duration,
+            input_generation_duration_seconds: input_gen_duration
+          })
+
+        {:error, reason} ->
+          Logger.error(
+            "Failed to read proof data for block #{block_number} (exit_status: #{exit_status}): #{inspect(reason)}"
+          )
+
+          Notifications.proof_data_failed(block_number, reason)
+
+          MissedBlocksStore.add_block(block_number, %{
+            stage: :proving,
+            reason: "Proving failed (exit_status: #{exit_status}): #{format_error(reason)}"
+          })
+      end
     end
 
     # Broadcast status update
@@ -393,6 +415,7 @@ defmodule EthProofsClient.Prover do
 
       {:error, reason} ->
         Logger.error("Failed to report queued status for block #{block_number}: #{reason}")
+        Notifications.ethproofs_request_failed(block_number, "queued", reason)
     end
   end
 
@@ -403,6 +426,7 @@ defmodule EthProofsClient.Prover do
 
       {:error, reason} ->
         Logger.error("Failed to report proving status for block #{block_number}: #{reason}")
+        Notifications.ethproofs_request_failed(block_number, "proving", reason)
     end
   end
 
@@ -414,11 +438,12 @@ defmodule EthProofsClient.Prover do
            proof_data.proof,
            proof_data.verifier_id
          ) do
-      {:ok, _proof_id} ->
-        :ok
+      {:ok, proof_id} ->
+        {:ok, proof_id}
 
       {:error, reason} ->
         Logger.error("Failed to report proved status for block #{block_number}: #{reason}")
+        {:error, reason}
     end
   end
 

@@ -18,7 +18,9 @@ defmodule EthProofsClient.InputGenerator do
   use GenServer
   require Logger
 
+  alias EthProofsClient.BlockMetadata
   alias EthProofsClient.MissedBlocksStore
+  alias EthProofsClient.Notifications
   alias EthProofsClient.Prover
 
   @block_fetch_interval 2_000
@@ -57,6 +59,7 @@ defmodule EthProofsClient.InputGenerator do
 
   @impl true
   def init(_state) do
+    BlockMetadata.init_table()
     schedule_fetch()
     {:ok, %__MODULE__{status: :idle, idle_since: DateTime.utc_now()}}
   end
@@ -118,6 +121,7 @@ defmodule EthProofsClient.InputGenerator do
 
       {:error, reason} ->
         Logger.error("Failed to generate input for block #{block_number}: #{inspect(reason)}")
+        Notifications.input_generation_failed(block_number, reason)
 
         MissedBlocksStore.add_block(block_number, %{
           stage: :input_generation,
@@ -146,6 +150,7 @@ defmodule EthProofsClient.InputGenerator do
         %{status: {:generating, block_number, ref}} = state
       ) do
     Logger.error("Generation task crashed for block #{block_number}: #{inspect(reason)}")
+    Notifications.input_generation_failed(block_number, {:task_crash, reason})
 
     MissedBlocksStore.add_block(block_number, %{
       stage: :input_generation,
@@ -257,6 +262,7 @@ defmodule EthProofsClient.InputGenerator do
   defp do_generate_input(block_number) do
     with {:ok, block_json_bytes} <-
            EthProofsClient.EthRpc.get_block_by_number(block_number, true, raw: true),
+         _ = BlockMetadata.put_from_json(block_number, block_json_bytes),
          {:ok, witness_json_bytes} <-
            EthProofsClient.EthRpc.debug_execution_witness(block_number, raw: true),
          {:ok, input_path} <- generate_input(block_json_bytes, witness_json_bytes) do

@@ -8,9 +8,9 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-ethrex-config = { git = "https://github.com/lambdaclass/ethrex", branch = "main", package = "ethrex-config" }
-ethrex-rpc = { git = "https://github.com/lambdaclass/ethrex", branch = "main", package = "ethrex-rpc" }
-ethrex-guest = { git = "https://github.com/lambdaclass/ethrex", branch = "main", package = "guest_program" }
+ethrex-config = { git = "https://github.com/lambdaclass/ethrex", branch = "zisk-v0.16.1", package = "ethrex-config" }
+ethrex-rpc = { git = "https://github.com/lambdaclass/ethrex", branch = "zisk-v0.16.1", package = "ethrex-rpc" }
+ethrex-guest = { git = "https://github.com/lambdaclass/ethrex", branch = "zisk-v0.16.1", package = "ethrex-guest-program" }
 
 rkyv = { version = "0.8.10", features = ["std", "unaligned"] }
 

@@ -11,7 +11,7 @@ EthProofs client written in Elixir, powered by ethrex.
 
 - Erlang 28.2 (we recommend using [asdf](https://asdf-vm.com/), see instructions below. Alternatively, you can follow the [official instructions](https://www.erlang.org/downloads))
 - Elixir 1.19.4-opt-28 (we recommend using [asdf](https://asdf-vm.com/), see instructions below. Alternatively, you can follow the [official instructions](https://elixir-lang.org/install.html))
-- ZisK toolchain v0.14.0 (see instructions below)
+- ZisK toolchain v0.16.1 (see instructions below)
 - CUDA Toolkit 12.9 or 13.0 (install via [NVIDIA's guide](https://developer.nvidia.com/cuda-toolkit-archive))
 
 ### How to run
@@ -54,7 +54,7 @@ asdf reshim
     # Clone the ZisK repository:
     git clone https://github.com/0xPolygonHermez/zisk
     cd zisk
-    git checkout v0.14.0
+    git checkout v0.16.1
 
     # Build ZisK tools:
     cargo build --release --features gpu
@@ -81,9 +81,9 @@ asdf reshim
 1. Download the GPU proving key:
 
     ```bash
-    wget https://storage.googleapis.com/zisk-setup/zisk-provingkey-0.14.0.tar.gz
+    wget https://storage.googleapis.com/zisk-setup/zisk-provingkey-0.16.0.tar.gz
 
-    tar -xzf zisk-provingkey-0.14.0.tar.gz
+    tar -xzf zisk-provingkey-0.16.0.tar.gz
 
     mv provingKey $HOME/.zisk/provingKey
     ```
@@ -97,7 +97,7 @@ asdf reshim
 3. Run the following in the root of the project to generate the ROM setup:
 
     ```bash
-    cargo-zisk rom-setup -e ethrex_guest_programs/ethrex-24d4b6404-zisk-0.14.0-guest.elf
+    cargo-zisk rom-setup -e ethrex_guest_programs/ethrex-24d4b6404-zisk-0.16.1-guest.elf
     ```
 
 #### 3. Run the EthProofs client application

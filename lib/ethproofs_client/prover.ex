@@ -24,7 +24,8 @@ defmodule EthProofsClient.Prover do
     :current_input_gen_duration,
     :timeout_ref,
     queue: :queue.new(),
-    queued_blocks: MapSet.new()
+    queued_blocks: MapSet.new(),
+    prover_output: ""
   ]
 
   # --- Public API ---
@@ -91,11 +92,11 @@ defmodule EthProofsClient.Prover do
     end
   end
 
-  # Handle port data output (logging only)
+  # Handle port data output (accumulate for metadata parsing)
   @impl true
   def handle_info({port, {:data, data}}, %{status: {:proving, _block_number, port}} = state) do
     Logger.debug("cargo-zisk output: #{data}")
-    {:noreply, state}
+    {:noreply, %{state | prover_output: state.prover_output <> data}}
   end
 
   # Handle normal port exit - this is the primary completion handler
@@ -259,7 +260,8 @@ defmodule EthProofsClient.Prover do
             proving_since: DateTime.utc_now(),
             idle_since: nil,
             current_input_gen_duration: input_gen_duration,
-            timeout_ref: timeout_ref
+            timeout_ref: timeout_ref,
+            prover_output: ""
         }
 
       {:empty, _queue} ->
@@ -299,7 +301,7 @@ defmodule EthProofsClient.Prover do
     proving_duration = proving_duration(state)
     input_gen_duration = state.current_input_gen_duration
 
-    case read_proof_data(block_number) do
+    case read_proof_data(block_number, state.prover_output) do
       {:ok, proof_data} ->
         Logger.info(
           "Proved block #{block_number} in #{proof_data.time / 1000} seconds using #{proof_data.cycles} cycles"
@@ -338,24 +340,47 @@ defmodule EthProofsClient.Prover do
     }
   end
 
-  defp read_proof_data(block_number) do
+  defp read_proof_data(block_number, prover_output) do
     block_dir = Integer.to_string(block_number)
-    result_path = Path.join([@output_dir, block_dir, "result.json"])
-    proof_path = Path.join([@output_dir, block_dir, "vadcop_final_proof.compressed.bin"])
+    proof_path = Path.join([@output_dir, block_dir, "vadcop_final_proof.bin"])
 
-    with {:ok, result_content} <- File.read(result_path),
-         {:ok, %{"cycles" => cycles, "time" => time, "id" => id}} <- Jason.decode(result_content),
-         {:ok, proof_binary} <- File.read(proof_path) do
+    # Parse metadata from cargo-zisk stdout
+    cycles = parse_stdout_field(prover_output, ~r/steps:\s*([\d,]+)/)
+    time = parse_stdout_float(prover_output, ~r/Proof Time:\s*([\d.]+)\s*seconds/)
+    id = parse_stdout_string(prover_output, ~r/Proof ID:\s*([0-9a-f]+)/)
+
+    with {:ok, proof_binary} <- File.read(proof_path) do
       {:ok,
        %{
          cycles: cycles,
-         time: trunc(time * 1000),
+         time: if(time, do: trunc(time * 1000), else: 0),
          proof: Base.encode64(proof_binary, padding: false) |> String.replace(~r/\s+/, ""),
-         verifier_id: id
+         verifier_id: id || "unknown"
        }}
     else
       {:error, reason} -> {:error, reason}
       error -> {:error, error}
+    end
+  end
+
+  defp parse_stdout_field(output, regex) do
+    case Regex.run(regex, output) do
+      [_, value] -> value |> String.replace(",", "") |> String.to_integer()
+      _ -> 0
+    end
+  end
+
+  defp parse_stdout_float(output, regex) do
+    case Regex.run(regex, output) do
+      [_, value] -> String.to_float(value)
+      _ -> nil
+    end
+  end
+
+  defp parse_stdout_string(output, regex) do
+    case Regex.run(regex, output) do
+      [_, value] -> value
+      _ -> nil
     end
   end
 

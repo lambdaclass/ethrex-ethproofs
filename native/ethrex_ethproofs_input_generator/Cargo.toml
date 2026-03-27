@@ -9,6 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ethrex-config = { git = "https://github.com/lambdaclass/ethrex", branch = "zisk-v0.16.1", package = "ethrex-config" }
+ethrex-common = { git = "https://github.com/lambdaclass/ethrex", branch = "zisk-v0.16.1", package = "ethrex-common" }
 ethrex-rpc = { git = "https://github.com/lambdaclass/ethrex", branch = "zisk-v0.16.1", package = "ethrex-rpc" }
 ethrex-guest = { git = "https://github.com/lambdaclass/ethrex", branch = "zisk-v0.16.1", package = "ethrex-guest-program" }
 

@@ -1,9 +1,10 @@
 use std::path::Path;
 
+use ethrex_common::types::block_execution_witness::RpcExecutionWitness;
 use ethrex_config::networks::{Network, PublicNetwork};
 use ethrex_guest::input::ProgramInput;
 use ethrex_rpc::{
-    debug::execution_witness::{RpcExecutionWitness, execution_witness_from_rpc_chain_config},
+    debug::execution_witness::execution_witness_from_rpc_chain_config,
     types::block::RpcBlock,
 };
 

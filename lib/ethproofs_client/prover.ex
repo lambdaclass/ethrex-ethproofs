@@ -349,6 +349,9 @@ defmodule EthProofsClient.Prover do
     time = parse_stdout_float(prover_output, ~r/Proof Time:\s*([\d.]+)\s*seconds/)
     id = parse_stdout_string(prover_output, ~r/Proof ID:\s*([0-9a-f]+)/)
 
+    # Wait briefly for filesystem sync after cargo-zisk exits
+    Process.sleep(1000)
+
     with {:ok, proof_binary} <- File.read(proof_path) do
       {:ok,
        %{

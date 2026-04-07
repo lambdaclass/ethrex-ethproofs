@@ -22,26 +22,31 @@ defmodule EthProofsClient.Rpc do
     Application.get_env(:ethproofs_client, :ethproofs_api_key)
   end
 
-  def ethproofs_cluster_id do
-    Application.get_env(:ethproofs_client, :ethproofs_cluster_id)
+  def zisk_cluster_id do
+    Application.get_env(:ethproofs_client, :zisk_cluster_id)
   end
 
-  def queued_proof(block_number) do
+  def airbender_cluster_id do
+    Application.get_env(:ethproofs_client, :airbender_cluster_id)
+  end
+
+  def queued_proof(block_number, cluster_id) do
     send_request("proofs/queued", %{
       block_number: block_number,
-      cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id())
+      cluster_id: String.to_integer(cluster_id)
     })
   end
 
-  def proving_proof(block_number) do
+  def proving_proof(block_number, cluster_id) do
     send_request("proofs/proving", %{
       block_number: block_number,
-      cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id())
+      cluster_id: String.to_integer(cluster_id)
     })
   end
 
   def proved_proof(
         block_number,
+        cluster_id,
         proving_time,
         proving_cycles,
         proof,
@@ -49,7 +54,7 @@ defmodule EthProofsClient.Rpc do
       ) do
     body = %{
       block_number: block_number,
-      cluster_id: String.to_integer(EthProofsClient.Rpc.ethproofs_cluster_id()),
+      cluster_id: String.to_integer(cluster_id),
       proving_time: proving_time,
       proving_cycles: proving_cycles,
       proof: proof
@@ -66,8 +71,8 @@ defmodule EthProofsClient.Rpc do
       {:ok, :skipped}
     end
 
-    if !ethproofs_cluster_id() do
-      Logger.warning("ETHPROOFS_CLUSTER_ID not set, skipping RPC call to #{endpoint}")
+    if !zisk_cluster_id() && !airbender_cluster_id() do
+      Logger.warning("No cluster ID set, skipping RPC call to #{endpoint}")
 
       {:ok, :skipped}
     end

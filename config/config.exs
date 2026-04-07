@@ -5,10 +5,15 @@ config :tesla, disable_deprecated_builder_warning: true
 
 config :ethproofs_client,
   eth_rpc_url: System.get_env("ETH_RPC_URL"),
-  elf_path: System.get_env("ELF_PATH"),
+  # ZisK prover config (backward compatible: ELF_PATH and ETHPROOFS_CLUSTER_ID still work)
+  zisk_elf_path: System.get_env("ZISK_ELF_PATH") || System.get_env("ELF_PATH"),
+  zisk_cluster_id: System.get_env("ZISK_CLUSTER_ID") || System.get_env("ETHPROOFS_CLUSTER_ID"),
+  # Airbender prover config (opt-in: set AIRBENDER_CLUSTER_ID to enable)
+  airbender_bin_path: System.get_env("AIRBENDER_BIN_PATH"),
+  airbender_cluster_id: System.get_env("AIRBENDER_CLUSTER_ID"),
+  # Shared
   ethproofs_rpc_url: System.get_env("ETHPROOFS_RPC_URL"),
   ethproofs_api_key: System.get_env("ETHPROOFS_API_KEY"),
-  ethproofs_cluster_id: System.get_env("ETHPROOFS_CLUSTER_ID"),
   proving_timeout_seconds: String.to_integer(System.get_env("PROVING_TIMEOUT_SECONDS") || "1200")
 
 # Phoenix endpoint configuration

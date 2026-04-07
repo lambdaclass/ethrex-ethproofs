@@ -109,12 +109,12 @@ defmodule EthProofsClient.InputGenerator do
     generation_duration = generation_duration(state)
 
     case result do
-      {:ok, input_path} ->
+      {:ok, input_paths} ->
         Logger.info(
-          "Generated input for block #{block_number} in #{generation_duration}s: #{input_path}"
+          "Generated input for block #{block_number} in #{generation_duration}s: #{inspect(input_paths)}"
         )
 
-        Prover.prove(block_number, input_path, generation_duration)
+        Prover.prove(block_number, input_paths, generation_duration)
 
       {:error, reason} ->
         Logger.error("Failed to generate input for block #{block_number}: #{inspect(reason)}")
@@ -259,8 +259,9 @@ defmodule EthProofsClient.InputGenerator do
            EthProofsClient.EthRpc.get_block_by_number(block_number, true, raw: true),
          {:ok, witness_json_bytes} <-
            EthProofsClient.EthRpc.debug_execution_witness(block_number, raw: true),
-         {:ok, input_path} <- generate_input(block_json_bytes, witness_json_bytes) do
-      {:ok, input_path}
+         {:ok, {zisk_path, airbender_path}} <-
+           generate_input(block_json_bytes, witness_json_bytes) do
+      {:ok, %{zisk: zisk_path, airbender: airbender_path}}
     else
       {:error, reason} -> {:error, reason}
       error -> {:error, error}

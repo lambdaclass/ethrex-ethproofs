@@ -18,10 +18,13 @@ defmodule EthProofsClient.Prover do
 
   defstruct [
     :status,
-    :elf,
+    :zisk_elf,
+    :airbender_bin,
+    :airbender_enabled,
     :proving_since,
     :idle_since,
     :current_input_gen_duration,
+    :current_block_input_paths,
     :timeout_ref,
     queue: :queue.new(),
     queued_blocks: MapSet.new(),
@@ -30,8 +33,8 @@ defmodule EthProofsClient.Prover do
 
   # --- Public API ---
 
-  def start_link(elf_path, _opts \\ []) do
-    GenServer.start_link(__MODULE__, %{elf: elf_path}, name: __MODULE__)
+  def start_link(prover_config, _opts \\ []) do
+    GenServer.start_link(__MODULE__, prover_config, name: __MODULE__)
   end
 
   @doc """
@@ -40,8 +43,8 @@ defmodule EthProofsClient.Prover do
   The optional `input_gen_duration` parameter tracks how long input generation took,
   so it can be displayed in the dashboard.
   """
-  def prove(block_number, input_path, input_gen_duration \\ nil) do
-    GenServer.cast(__MODULE__, {:prove, block_number, input_path, input_gen_duration})
+  def prove(block_number, input_paths, input_gen_duration \\ nil) do
+    GenServer.cast(__MODULE__, {:prove, block_number, input_paths, input_gen_duration})
   end
 
   @doc """
@@ -54,9 +57,17 @@ defmodule EthProofsClient.Prover do
   # --- Callbacks ---
 
   @impl true
-  def init(%{elf: elf}) do
+  def init(config) do
     Process.flag(:trap_exit, true)
-    {:ok, %__MODULE__{status: :idle, elf: elf, idle_since: DateTime.utc_now()}}
+
+    {:ok,
+     %__MODULE__{
+       status: :idle,
+       zisk_elf: config.zisk_elf_path,
+       airbender_bin: config.airbender_bin_path,
+       airbender_enabled: config.airbender_enabled,
+       idle_since: DateTime.utc_now()
+     }}
   end
 
   @impl true
@@ -75,7 +86,7 @@ defmodule EthProofsClient.Prover do
   end
 
   @impl true
-  def handle_cast({:prove, block_number, input_path, input_gen_duration}, state) do
+  def handle_cast({:prove, block_number, input_paths, input_gen_duration}, state) do
     cond do
       MapSet.member?(state.queued_blocks, block_number) ->
         Logger.debug("Block #{block_number} already queued, skipping")
@@ -86,16 +97,19 @@ defmodule EthProofsClient.Prover do
         {:noreply, state}
 
       true ->
-        report_queued(block_number)
-        new_state = enqueue(state, block_number, input_path, input_gen_duration)
+        report_queued(block_number, :zisk)
+        new_state = enqueue(state, block_number, input_paths, input_gen_duration)
         {:noreply, maybe_start_next(new_state)}
     end
   end
 
   # Handle port data output (accumulate for metadata parsing)
   @impl true
-  def handle_info({port, {:data, data}}, %{status: {:proving, _block_number, port}} = state) do
-    Logger.debug("cargo-zisk output: #{data}")
+  def handle_info(
+        {port, {:data, data}},
+        %{status: {:proving, _block_number, _prover_type, port}} = state
+      ) do
+    Logger.debug("Prover output: #{data}")
     {:noreply, %{state | prover_output: state.prover_output <> data}}
   end
 
@@ -103,30 +117,44 @@ defmodule EthProofsClient.Prover do
   @impl true
   def handle_info(
         {port, {:exit_status, status}},
-        %{status: {:proving, block_number, port}} = state
+        %{status: {:proving, block_number, prover_type, port}} = state
       ) do
-    Logger.info("cargo-zisk exited with status #{status} for block #{block_number}")
+    Logger.info("#{prover_type} exited with status #{status} for block #{block_number}")
 
     # Unlink immediately to prevent receiving duplicate EXIT message
     Process.unlink(port)
     cancel_timeout(state.timeout_ref)
 
-    new_state = handle_proof_completion(state, block_number, status)
-    {:noreply, maybe_start_next(new_state)}
+    new_state = handle_proof_completion(state, block_number, prover_type, status)
+
+    new_state =
+      case prover_type do
+        :zisk when state.airbender_enabled ->
+          # Chain to Airbender after ZisK succeeds
+          maybe_start_airbender(new_state, block_number)
+
+        _ ->
+          maybe_start_next(new_state)
+      end
+
+    {:noreply, new_state}
   end
 
   # Handle abnormal port termination (only if exit_status wasn't received)
   @impl true
-  def handle_info({:EXIT, port, reason}, %{status: {:proving, block_number, port}} = state) do
+  def handle_info(
+        {:EXIT, port, reason},
+        %{status: {:proving, block_number, prover_type, port}} = state
+      ) do
     Logger.warning(
-      "Port died unexpectedly for block #{block_number}: #{inspect(reason)}. Continuing with next item."
+      "#{prover_type} port died unexpectedly for block #{block_number}: #{inspect(reason)}. Continuing."
     )
 
     cancel_timeout(state.timeout_ref)
 
     MissedBlocksStore.add_block(block_number, %{
       stage: :proving,
-      reason: "Prover crashed: #{format_error(reason)}"
+      reason: "#{prover_type} crashed: #{format_error(reason)}"
     })
 
     new_state = %{
@@ -144,7 +172,7 @@ defmodule EthProofsClient.Prover do
   @impl true
   def handle_info(
         {:proving_timeout, block_number},
-        %{status: {:proving, block_number, port}} = state
+        %{status: {:proving, block_number, _prover_type, port}} = state
       ) do
     Logger.warning(
       "Proving timeout (#{div(proving_timeout_ms(), 1_000)}s) reached for block #{block_number}, killing prover process"
@@ -221,45 +249,47 @@ defmodule EthProofsClient.Prover do
 
   # --- Private Functions ---
 
-  defp currently_proving?(%{status: {:proving, block_number, _port}}, block_number), do: true
+  defp currently_proving?(%{status: {:proving, block_number, _type, _port}}, block_number),
+    do: true
+
   defp currently_proving?(_state, _block_number), do: false
 
-  defp enqueue(state, block_number, input_path, input_gen_duration) do
-    Logger.info("Enqueued block #{block_number} for proving (input: #{input_path})")
+  defp enqueue(state, block_number, input_paths, input_gen_duration) do
+    Logger.info("Enqueued block #{block_number} for proving")
 
     %{
       state
-      | queue: :queue.in({block_number, input_path, input_gen_duration}, state.queue),
+      | queue: :queue.in({block_number, input_paths, input_gen_duration}, state.queue),
         queued_blocks: MapSet.put(state.queued_blocks, block_number)
     }
   end
 
   defp maybe_start_next(%{status: :idle, queue: queue} = state) do
     case :queue.out(queue) do
-      {{:value, {block_number, input_path, input_gen_duration}}, new_queue} ->
-        port = start_prover(state.elf, block_number, input_path)
+      {{:value, {block_number, input_paths, input_gen_duration}}, new_queue} ->
+        zisk_input = input_paths.zisk
+        port = start_zisk_prover(state.zisk_elf, block_number, zisk_input)
         Process.link(port)
-        report_proving(block_number)
+        report_proving(block_number, :zisk)
 
         Logger.info(
-          "Started cargo-zisk prover for block #{block_number} (ELF: #{state.elf}, INPUT: #{input_path}, PORT: #{inspect(port)})"
+          "Started ZisK prover for block #{block_number} (ELF: #{state.zisk_elf}, INPUT: #{zisk_input})"
         )
 
-        # Broadcast status update
         broadcast_status_update({:proving, block_number})
 
-        # Schedule proving timeout
         timeout_ref =
           Process.send_after(self(), {:proving_timeout, block_number}, proving_timeout_ms())
 
         %{
           state
-          | status: {:proving, block_number, port},
+          | status: {:proving, block_number, :zisk, port},
             queue: new_queue,
             queued_blocks: MapSet.delete(state.queued_blocks, block_number),
             proving_since: DateTime.utc_now(),
             idle_since: nil,
             current_input_gen_duration: input_gen_duration,
+            current_block_input_paths: input_paths,
             timeout_ref: timeout_ref,
             prover_output: ""
         }
@@ -273,7 +303,41 @@ defmodule EthProofsClient.Prover do
   # Already proving, do nothing
   defp maybe_start_next(state), do: state
 
-  defp start_prover(elf, block_number, input_path) do
+  defp maybe_start_airbender(%{status: :idle} = state, block_number) do
+    case state.current_block_input_paths do
+      %{airbender: airbender_input} when airbender_input != nil ->
+        port = start_airbender_prover(state.airbender_bin, block_number, airbender_input)
+        Process.link(port)
+        report_queued(block_number, :airbender)
+        report_proving(block_number, :airbender)
+
+        Logger.info(
+          "Started Airbender prover for block #{block_number} (BIN: #{state.airbender_bin}, INPUT: #{airbender_input})"
+        )
+
+        broadcast_status_update({:proving, block_number})
+
+        timeout_ref =
+          Process.send_after(self(), {:proving_timeout, block_number}, proving_timeout_ms())
+
+        %{
+          state
+          | status: {:proving, block_number, :airbender, port},
+            proving_since: DateTime.utc_now(),
+            idle_since: nil,
+            timeout_ref: timeout_ref,
+            prover_output: ""
+        }
+
+      _ ->
+        Logger.warning("No Airbender input for block #{block_number}, skipping")
+        maybe_start_next(state)
+    end
+  end
+
+  defp maybe_start_airbender(state, _block_number), do: state
+
+  defp start_zisk_prover(elf, block_number, input_path) do
     output_dir = Path.join(@output_dir, Integer.to_string(block_number))
     File.mkdir_p!(output_dir)
 
@@ -297,37 +361,63 @@ defmodule EthProofsClient.Prover do
     )
   end
 
-  defp handle_proof_completion(state, block_number, exit_status) do
+  defp start_airbender_prover(bin_path, block_number, input_path) do
+    output_dir = Path.join(@output_dir, "airbender_#{block_number}")
+    File.mkdir_p!(output_dir)
+    output_file = Path.join(output_dir, "proof.bin")
+
+    Port.open(
+      {:spawn_executable, System.find_executable("cargo-airbender")},
+      [
+        :binary,
+        :exit_status,
+        args: [
+          "prove",
+          bin_path,
+          "--input",
+          input_path,
+          "--output",
+          output_file,
+          "--backend",
+          "gpu",
+          "--level",
+          "base"
+        ]
+      ]
+    )
+  end
+
+  defp handle_proof_completion(state, block_number, prover_type, exit_status) do
     proving_duration = proving_duration(state)
     input_gen_duration = state.current_input_gen_duration
 
-    case read_proof_data(block_number, state.prover_output) do
+    case read_proof_data(block_number, prover_type, state.prover_output) do
       {:ok, proof_data} ->
         Logger.info(
-          "Proved block #{block_number} in #{proof_data.time / 1000} seconds using #{proof_data.cycles} cycles"
+          "#{prover_type} proved block #{block_number} in #{proof_data.time / 1000}s using #{proof_data.cycles} cycles"
         )
 
-        report_proved(block_number, proof_data)
+        report_proved(block_number, prover_type, proof_data)
 
-        # Store in ProvedBlocksStore for dashboard
         EthProofsClient.ProvedBlocksStore.add_block(block_number, %{
           proved_at: DateTime.utc_now(),
+          prover_type: prover_type,
           proving_duration_seconds: proving_duration,
           input_generation_duration_seconds: input_gen_duration
         })
 
       {:error, reason} ->
         Logger.error(
-          "Failed to read proof data for block #{block_number} (exit_status: #{exit_status}): #{inspect(reason)}"
+          "#{prover_type} failed for block #{block_number} (exit_status: #{exit_status}): #{inspect(reason)}"
         )
 
         MissedBlocksStore.add_block(block_number, %{
           stage: :proving,
-          reason: "Proving failed (exit_status: #{exit_status}): #{format_error(reason)}"
+          prover_type: prover_type,
+          reason: "#{prover_type} failed (exit_status: #{exit_status}): #{format_error(reason)}"
         })
     end
 
-    # Broadcast status update
     broadcast_status_update(:idle)
 
     %{
@@ -335,21 +425,18 @@ defmodule EthProofsClient.Prover do
       | status: :idle,
         proving_since: nil,
         idle_since: DateTime.utc_now(),
-        current_input_gen_duration: nil,
         timeout_ref: nil
     }
   end
 
-  defp read_proof_data(block_number, prover_output) do
+  defp read_proof_data(block_number, :zisk, prover_output) do
     block_dir = Integer.to_string(block_number)
     proof_path = Path.join([@output_dir, block_dir, "vadcop_final_proof.bin"])
 
-    # Parse metadata from cargo-zisk stdout
     cycles = parse_stdout_field(prover_output, ~r/steps:\s*([\d,]+)/)
     time = parse_stdout_float(prover_output, ~r/Proof Time:\s*([\d.]+)\s*seconds/)
     id = parse_stdout_string(prover_output, ~r/Proof ID:\s*([0-9a-f]+)/)
 
-    # Wait briefly for filesystem sync after cargo-zisk exits
     Process.sleep(1000)
 
     with {:ok, proof_binary} <- File.read(proof_path) do
@@ -359,6 +446,29 @@ defmodule EthProofsClient.Prover do
          time: if(time, do: trunc(time * 1000), else: 0),
          proof: Base.encode64(proof_binary, padding: false) |> String.replace(~r/\s+/, ""),
          verifier_id: id || "unknown"
+       }}
+    else
+      {:error, reason} -> {:error, reason}
+      error -> {:error, error}
+    end
+  end
+
+  defp read_proof_data(block_number, :airbender, prover_output) do
+    proof_path = Path.join([@output_dir, "airbender_#{block_number}", "proof.bin"])
+
+    cycles = parse_stdout_field(prover_output, ~r/cycles:\s*([\d,]+)/)
+    # Airbender reports wall time via the shell `time` command; use proving_duration instead
+    time = parse_stdout_float(prover_output, ~r/real\s+(\d+)m([\d.]+)s/)
+
+    Process.sleep(1000)
+
+    with {:ok, proof_binary} <- File.read(proof_path) do
+      {:ok,
+       %{
+         cycles: cycles,
+         time: if(time, do: trunc(time * 1000), else: 0),
+         proof: Base.encode64(proof_binary, padding: false) |> String.replace(~r/\s+/, ""),
+         verifier_id: nil
        }}
     else
       {:error, reason} -> {:error, reason}
@@ -388,7 +498,7 @@ defmodule EthProofsClient.Prover do
   end
 
   defp sanitize_status(:idle), do: :idle
-  defp sanitize_status({:proving, block_number, _port}), do: {:proving, block_number}
+  defp sanitize_status({:proving, block_number, prover_type, _port}), do: {:proving, block_number, prover_type}
 
   defp proving_timeout_ms do
     :timer.seconds(Application.get_env(:ethproofs_client, :proving_timeout_seconds, 1200))
@@ -414,39 +524,52 @@ defmodule EthProofsClient.Prover do
 
   # --- API Reporting Functions ---
 
-  defp report_queued(block_number) do
-    case EthProofsClient.Rpc.queued_proof(block_number) do
-      {:ok, _proof_id} ->
-        :ok
+  defp cluster_id_for(:zisk), do: EthProofsClient.Rpc.zisk_cluster_id()
+  defp cluster_id_for(:airbender), do: EthProofsClient.Rpc.airbender_cluster_id()
 
-      {:error, reason} ->
-        Logger.error("Failed to report queued status for block #{block_number}: #{reason}")
+  defp report_queued(block_number, prover_type) do
+    case cluster_id_for(prover_type) do
+      nil ->
+        Logger.debug("No cluster ID for #{prover_type}, skipping queued report")
+
+      cluster_id ->
+        case EthProofsClient.Rpc.queued_proof(block_number, cluster_id) do
+          {:ok, _proof_id} -> :ok
+          {:error, reason} -> Logger.error("Failed to report queued for block #{block_number} (#{prover_type}): #{reason}")
+        end
     end
   end
 
-  defp report_proving(block_number) do
-    case EthProofsClient.Rpc.proving_proof(block_number) do
-      {:ok, _proof_id} ->
+  defp report_proving(block_number, prover_type) do
+    case cluster_id_for(prover_type) do
+      nil ->
         :ok
 
-      {:error, reason} ->
-        Logger.error("Failed to report proving status for block #{block_number}: #{reason}")
+      cluster_id ->
+        case EthProofsClient.Rpc.proving_proof(block_number, cluster_id) do
+          {:ok, _proof_id} -> :ok
+          {:error, reason} -> Logger.error("Failed to report proving for block #{block_number} (#{prover_type}): #{reason}")
+        end
     end
   end
 
-  defp report_proved(block_number, proof_data) do
-    case EthProofsClient.Rpc.proved_proof(
-           block_number,
-           proof_data.time,
-           proof_data.cycles,
-           proof_data.proof,
-           proof_data.verifier_id
-         ) do
-      {:ok, _proof_id} ->
+  defp report_proved(block_number, prover_type, proof_data) do
+    case cluster_id_for(prover_type) do
+      nil ->
         :ok
 
-      {:error, reason} ->
-        Logger.error("Failed to report proved status for block #{block_number}: #{reason}")
+      cluster_id ->
+        case EthProofsClient.Rpc.proved_proof(
+               block_number,
+               cluster_id,
+               proof_data.time,
+               proof_data.cycles,
+               proof_data.proof,
+               proof_data.verifier_id
+             ) do
+          {:ok, _proof_id} -> :ok
+          {:error, reason} -> Logger.error("Failed to report proved for block #{block_number} (#{prover_type}): #{reason}")
+        end
     end
   end
 

@@ -31,9 +31,22 @@ defmodule EthProofsClient.Application do
     # Record application start time for uptime tracking
     :persistent_term.put(:ethproofs_client_started_at, DateTime.utc_now())
 
-    elf_path =
-      Application.get_env(:ethproofs_client, :elf_path) ||
-        raise "ELF_PATH environment variable must be set"
+    zisk_elf_path =
+      Application.get_env(:ethproofs_client, :zisk_elf_path) ||
+        raise "ZISK_ELF_PATH (or ELF_PATH) environment variable must be set"
+
+    airbender_cluster_id = Application.get_env(:ethproofs_client, :airbender_cluster_id)
+    airbender_bin_path = Application.get_env(:ethproofs_client, :airbender_bin_path)
+
+    if airbender_cluster_id && !airbender_bin_path do
+      raise "AIRBENDER_BIN_PATH must be set when AIRBENDER_CLUSTER_ID is configured"
+    end
+
+    prover_config = %{
+      zisk_elf_path: zisk_elf_path,
+      airbender_bin_path: airbender_bin_path,
+      airbender_enabled: airbender_cluster_id != nil
+    }
 
     children = [
       # PubSub for real-time updates
@@ -45,7 +58,7 @@ defmodule EthProofsClient.Application do
       # MissedBlocksStore tracks failed blocks
       MissedBlocksStore,
       # Core GenServers
-      {Prover, elf_path},
+      {Prover, prover_config},
       {InputGenerator, []},
       # Phoenix web endpoint
       EthProofsClientWeb.Endpoint

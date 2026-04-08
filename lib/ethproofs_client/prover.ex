@@ -391,7 +391,7 @@ defmodule EthProofsClient.Prover do
     proving_duration = proving_duration(state)
     input_gen_duration = state.current_input_gen_duration
 
-    case read_proof_data(block_number, prover_type, state.prover_output) do
+    case read_proof_data(block_number, prover_type, state.prover_output, proving_duration) do
       {:ok, proof_data} ->
         Logger.info(
           "#{prover_type} proved block #{block_number} in #{proof_data.time / 1000}s using #{proof_data.cycles} cycles"
@@ -429,7 +429,7 @@ defmodule EthProofsClient.Prover do
     }
   end
 
-  defp read_proof_data(block_number, :zisk, prover_output) do
+  defp read_proof_data(block_number, :zisk, prover_output, _proving_duration) do
     block_dir = Integer.to_string(block_number)
     proof_path = Path.join([@output_dir, block_dir, "vadcop_final_proof.bin"])
 
@@ -453,12 +453,12 @@ defmodule EthProofsClient.Prover do
     end
   end
 
-  defp read_proof_data(block_number, :airbender, prover_output) do
+  defp read_proof_data(block_number, :airbender, prover_output, proving_duration) do
     proof_path = Path.join([@output_dir, "airbender_#{block_number}", "proof.bin"])
 
     cycles = parse_stdout_field(prover_output, ~r/cycles:\s*([\d,]+)/)
-    # Airbender reports wall time via the shell `time` command; use proving_duration instead
-    time = parse_stdout_float(prover_output, ~r/real\s+(\d+)m([\d.]+)s/)
+    # Airbender doesn't report time in stdout. Use wall-clock proving_duration (seconds → ms).
+    time = if proving_duration, do: proving_duration * 1000, else: 0
 
     Process.sleep(1000)
 
@@ -466,7 +466,7 @@ defmodule EthProofsClient.Prover do
       {:ok,
        %{
          cycles: cycles,
-         time: if(time, do: trunc(time * 1000), else: 0),
+         time: time,
          proof: Base.encode64(proof_binary, padding: false) |> String.replace(~r/\s+/, ""),
          verifier_id: nil
        }}

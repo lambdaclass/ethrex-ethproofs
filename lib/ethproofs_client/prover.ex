@@ -379,9 +379,7 @@ defmodule EthProofsClient.Prover do
           "--output",
           output_file,
           "--backend",
-          "gpu",
-          "--level",
-          "base"
+          "gpu"
         ]
       ]
     )

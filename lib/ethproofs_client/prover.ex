@@ -371,6 +371,7 @@ defmodule EthProofsClient.Prover do
       [
         :binary,
         :exit_status,
+        {:env, [{~c"RUST_LOG", ~c"info"}]},
         args: [
           "prove",
           bin_path,
@@ -451,12 +452,11 @@ defmodule EthProofsClient.Prover do
     end
   end
 
-  defp read_proof_data(block_number, :airbender, prover_output, proving_duration) do
+  defp read_proof_data(block_number, :airbender, prover_output, _proving_duration) do
     proof_path = Path.join([@output_dir, "airbender_#{block_number}", "proof.bin"])
 
     cycles = parse_stdout_field(prover_output, ~r/cycles:\s*([\d,]+)/)
-    # Airbender doesn't report time in stdout. Use wall-clock proving_duration (seconds → ms).
-    time = if proving_duration, do: proving_duration * 1000, else: 0
+    time = parse_stdout_float(prover_output, ~r/Base layer proof done in ([\d.]+)s/)
 
     Process.sleep(1000)
 
@@ -464,7 +464,7 @@ defmodule EthProofsClient.Prover do
       {:ok,
        %{
          cycles: cycles,
-         time: time,
+         time: if(time, do: trunc(time * 1000), else: 0),
          proof: Base.encode64(proof_binary, padding: false) |> String.replace(~r/\s+/, ""),
          verifier_id: nil
        }}

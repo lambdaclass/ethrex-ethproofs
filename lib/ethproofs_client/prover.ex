@@ -456,7 +456,8 @@ defmodule EthProofsClient.Prover do
     proof_path = Path.join([@output_dir, "airbender_#{block_number}", "proof.bin"])
 
     cycles = parse_stdout_field(prover_output, ~r/cycles:\s*([\d,]+)/)
-    time = parse_stdout_float(prover_output, ~r/Base layer proof done in ([\d.]+)s/)
+    # Sum all proving layer times (base + recursion layers)
+    time = sum_proving_times(prover_output)
 
     Process.sleep(1000)
 
@@ -493,6 +494,18 @@ defmodule EthProofsClient.Prover do
       [_, value] -> value
       _ -> nil
     end
+  end
+
+  # Sum all "proof done in X.XXXs" times from Airbender output
+  # (base layer + unrolled recursion layers + unified recursion layers)
+  defp sum_proving_times(output) do
+    Regex.scan(~r/proof done in ([\d.]+)s/, output)
+    |> Enum.reduce(0.0, fn [_, time_str], acc ->
+      case Float.parse(time_str) do
+        {time, _} -> acc + time
+        :error -> acc
+      end
+    end)
   end
 
   defp sanitize_status(:idle), do: :idle

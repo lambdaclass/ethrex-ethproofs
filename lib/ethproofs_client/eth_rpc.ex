@@ -3,7 +3,10 @@ defmodule EthProofsClient.EthRpc do
 
   use Tesla
 
-  @request_timeout 30_000
+  # debug_executionWitness responses run to tens of MB and can take >30s to generate
+  # and transfer when the RPC node is far from the prover or under load; 30s caused
+  # recurring missed blocks at the input-generation stage.
+  @request_timeout 120_000
 
   plug(Tesla.Middleware.Timeout, timeout: @request_timeout)
   plug(Tesla.Middleware.Headers, [{"content-type", "application/json"}])

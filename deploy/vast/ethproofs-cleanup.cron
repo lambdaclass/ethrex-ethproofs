@@ -1,0 +1,4 @@
+# Install: cp to /etc/cron.d/ethproofs-cleanup (mode 644)
+# Prunes per-block prover input files older than 14 days; they otherwise accumulate
+# hundreds of GB over a few months of proving every 100th block.
+0 4 * * * root find /root/ethrex-ethproofs -maxdepth 1 \( -name "*.bin" -o -name "*.hex" \) -mtime +14 -delete
